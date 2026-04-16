@@ -93,7 +93,15 @@ app.use('/api/groww-stocks', (req, res) => {
 app.get('/api/news', async (req, res) => {
   const query = req.query.q || '';
   const stockName = query.replace('.NS', '').replace('.BO', '');
-  const searchTerm = encodeURIComponent(`${stockName} stock India`);
+  
+  // Fix: Don't artificially append stock India if query already defines market intent
+  let searchTerm;
+  if (stockName.toLowerCase().includes('stock market') || stockName.toLowerCase().includes('nifty') || stockName === '') {
+     searchTerm = encodeURIComponent(stockName || 'indian stock market latest');
+  } else {
+     searchTerm = encodeURIComponent(`${stockName} stock India`);
+  }
+  
   const rssUrl = `https://news.google.com/rss/search?q=${searchTerm}&hl=en-IN&gl=IN&ceid=IN:en`;
   
   console.log('[NEWS]', rssUrl);
@@ -225,6 +233,8 @@ app.get('/api/ipos/gmp', async (req, res) => {
       }
     });
     
+    // Sort by highest GMP% to bubble active grey markets to top of UI widget
+    parsedIPOs.sort((a,b) => b.gmpPercent - a.gmpPercent);
     res.json({ ipos: parsedIPOs.slice(0, 15) });
   } catch (err) {
     console.error('IPO Scraper error:', err.message);

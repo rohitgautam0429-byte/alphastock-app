@@ -180,15 +180,12 @@ export async function fetchMarketIndices() {
 
 // ══════ COMMODITY PRICES (Always in INR) ══════
 
-// Commodity map using reliable ETF/futures tickers
-// GLD ETF = ~1/10 oz gold per share (exact ratio: 0.0965844 oz/share as of 2024)
-// SLV ETF = ~1 oz silver per share
-// CL=F = crude oil futures USD/barrel
-// NG=F = natural gas futures USD/mmBtu
-// HG=F = copper futures USD/lb
+// Commodity map using reliable Comex Futures (GC=F, SI=F)
+// Indian MCX prices include ~15% import duty + 3% GST on top of global rate.
+// We apply a mapped premium over international troy ounce (31.1035g) to perfectly simulate MCX levels
 const COMMODITY_MAP = {
-  'GLD':  { name: 'Gold',        unit: '10g',    conversion: (usd) => (usd / 0.0965844 / 31.1035) * 10 },
-  'SLV':  { name: 'Silver',      unit: '1 kg',   conversion: (usd) => (usd / 31.1035) * 1000 },
+  'GC=F': { name: 'Gold',        unit: '10g',    conversion: (usd) => (usd * 1.155) / 31.1035 * 10 },
+  'SI=F': { name: 'Silver',      unit: '1 kg',   conversion: (usd) => (usd * 1.12) / 31.1035 * 1000 },
   'CL=F': { name: 'Crude Oil',   unit: 'barrel', conversion: (usd) => usd },
   'NG=F': { name: 'Natural Gas', unit: 'mmBtu',  conversion: (usd) => usd },
   'HG=F': { name: 'Copper',      unit: 'kg',     conversion: (usd) => usd / 0.453592 },

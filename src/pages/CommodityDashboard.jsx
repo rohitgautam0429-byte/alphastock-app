@@ -8,8 +8,8 @@ export default function CommodityDashboard() {
   const commodityList = commodities
     ? Object.values(commodities)
     : [
-      { name: 'Gold', symbol: 'GC=F', price: 137100, changePercent: 0.5, currency: 'INR' },
-      { name: 'Silver', symbol: 'SI=F', price: 221500, changePercent: 0.8, currency: 'INR' },
+      { name: 'Gold', symbol: 'GC=F', price: 72100, changePercent: 0.5, currency: 'INR' },
+      { name: 'Silver', symbol: 'SI=F', price: 83500, changePercent: 0.8, currency: 'INR' },
       { name: 'Crude Oil', symbol: 'CL=F', price: 6580, changePercent: -1.2, currency: 'INR' },
       { name: 'Natural Gas', symbol: 'NG=F', price: 215, changePercent: -0.5, currency: 'INR' },
       { name: 'Copper', symbol: 'HG=F', price: 850, changePercent: 0.3, currency: 'INR' },
