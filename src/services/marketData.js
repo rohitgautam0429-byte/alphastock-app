@@ -158,7 +158,8 @@ export async function fetchMarketIndices() {
   const results = {};
   
   for (const sym of symbols) {
-    const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=1d&includePrePost=true`);
+    // Use 5d range so after-market-close we still get today's closing price
+    const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
     const quote = extractPriceFromChart(data, false); // Indices are already in INR
     if (quote) results[sym] = quote;
   }
@@ -197,7 +198,8 @@ export async function fetchCommodityPrices() {
 
   for (const sym of yahooSymbols) {
     try {
-      const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=1d&includePrePost=true`);
+      // Use 5d range so after-market-close we still get today's closing price
+      const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
       if (data?.chart?.result?.[0]) {
         const meta = data.chart.result[0].meta;
         const usdPrice   = meta.regularMarketPrice ?? 0;
