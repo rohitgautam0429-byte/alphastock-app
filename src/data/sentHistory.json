@@ -1,0 +1,102 @@
+{
+  "RELIANCE": {
+    "timestamp": 1776326370720,
+    "score": 100
+  },
+  "BAJFINANCE": {
+    "timestamp": 1776326370720,
+    "score": 100
+  },
+  "MARUTI": {
+    "timestamp": 1776326370720,
+    "score": 100
+  },
+  "NTPC": {
+    "timestamp": 1776326370720,
+    "score": 100
+  },
+  "TATAMOTORS": {
+    "timestamp": 1776326370720,
+    "score": 100
+  },
+  "KNRCON": {
+    "timestamp": 1776326808495,
+    "score": 67.5
+  },
+  "INFY": {
+    "timestamp": 1776326808495,
+    "score": 64.9
+  },
+  "SUZLON": {
+    "timestamp": 1776326808495,
+    "score": 63.77
+  },
+  "PARAS": {
+    "timestamp": 1776326808495,
+    "score": 62.96
+  },
+  "DELHIVERY": {
+    "timestamp": 1776326808495,
+    "score": 62.49
+  },
+  "SONACOMS": {
+    "timestamp": 1776326935949,
+    "score": 61.98
+  },
+  "SYRMA": {
+    "timestamp": 1776326935949,
+    "score": 61.77
+  },
+  "CUMMINSIND": {
+    "timestamp": 1776326935949,
+    "score": 60.85
+  },
+  "HAL": {
+    "timestamp": 1776326935949,
+    "score": 60.67
+  },
+  "ADANIENT": {
+    "timestamp": 1776326935949,
+    "score": 60.57
+  },
+  "TRENT": {
+    "timestamp": 1776328096396,
+    "score": 71.77
+  },
+  "WIPRO": {
+    "timestamp": 1776328096396,
+    "score": 69.67
+  },
+  "ICICIBANK": {
+    "timestamp": 1776328096396,
+    "score": 69.06
+  },
+  "SBIN": {
+    "timestamp": 1776328096396,
+    "score": 68.28
+  },
+  "OLECTRA": {
+    "timestamp": 1776328096396,
+    "score": 67.66
+  },
+  "TITAN": {
+    "timestamp": 1776328321906,
+    "score": 66.91
+  },
+  "LT": {
+    "timestamp": 1776328321906,
+    "score": 66.67
+  },
+  "POLYCAB": {
+    "timestamp": 1776328321906,
+    "score": 64.05
+  },
+  "ITC": {
+    "timestamp": 1776328321906,
+    "score": 62.74
+  },
+  "PERSISTENT": {
+    "timestamp": 1776328321906,
+    "score": 61.42
+  }
+}

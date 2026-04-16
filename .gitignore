@@ -1,0 +1,51 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local Netlify folder
+.netlify
+
+# ── SECURITY: Never commit secrets ──
+.env
+.env.*
+!.env.example
+
+# ── Windows binaries (not needed on cloud) ──
+cloudflared.exe
+
+# ── Junk / temporary files ──
+*.txt
+*.json.log
+cf_clean.log
+public_tunnel.log
+current_tunnel*.log
+final_tunnel*.log
+broker_tunnel.log
+build.log
+lint.json
+lint_output.txt
+search.txt
+search2.txt
+yahoo_test.json
+url.txt
