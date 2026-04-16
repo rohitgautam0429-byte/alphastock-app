@@ -31,6 +31,21 @@ function checkEnvHealth() {
 
 const YAHOO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// ── Simple in-memory TTL cache to survive transient upstream failures ──
+const _cache = {};
+function cacheGet(key) {
+  const entry = _cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > entry.ttl) return null; // expired
+  return entry.data;
+}
+function cacheSet(key, data, ttlMs) {
+  _cache[key] = { data, ts: Date.now(), ttl: ttlMs };
+}
+function cacheGetStale(key) {
+  return _cache[key]?.data ?? null; // always return last known, even if expired
+}
+
 // ── Generic proxy helper ──
 async function proxyRequest(targetUrl, res, extraHeaders = {}) {
   try {
@@ -106,6 +121,10 @@ app.get('/api/news', async (req, res) => {
   
   console.log('[NEWS]', rssUrl);
   
+  const cacheKey = `news:${searchTerm}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return res.json(cached);
+  
   try {
     const response = await fetch(rssUrl, {
       headers: { 'User-Agent': YAHOO_UA, 'Accept': 'application/xml, text/xml, */*' }
@@ -123,23 +142,26 @@ app.get('/api/news', async (req, res) => {
       const pubDate = (itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
       const source = (itemXml.match(/<source[^>]*>([\s\S]*?)<\/source>/) || [])[1] || 'News';
       
-      // Clean CDATA
-      const cleanTitle = title.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-      const cleanLink = link.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+      const cleanTitle = title.replace(/<\!\[CDATA\[|\]\]>/g, '').trim();
+      const cleanLink = link.replace(/<\!\[CDATA\[|\]\]>/g, '').trim();
       
       if (cleanTitle) {
         items.push({
           title: cleanTitle,
           link: cleanLink,
           pubDate: pubDate.trim(),
-          source: source.replace(/<!\[CDATA\[|\]\]>/g, '').trim(),
+          source: source.replace(/<\!\[CDATA\[|\]\]>/g, '').trim(),
         });
       }
     }
     
-    res.json({ articles: items });
+    const result = { articles: items };
+    if (items.length > 0) cacheSet(cacheKey, result, 10 * 60 * 1000); // cache 10 min
+    res.json(result);
   } catch (err) {
     console.error('News fetch error:', err.message);
+    const stale = cacheGetStale(cacheKey);
+    if (stale) { console.log('[NEWS] Serving stale cache'); return res.json(stale); }
     res.status(502).json({ articles: [], error: err.message });
   }
 });
