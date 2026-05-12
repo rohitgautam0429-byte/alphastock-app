@@ -1,39 +1,27 @@
-import { useState, useEffect } from 'react';
-import { Rocket, Info, TrendingUp, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
-
-// Dynamic scraper fetches this array natively from the backend now
+import { useState, useEffect, useMemo } from 'react';
+import { Rocket, Info, Clock, ExternalLink, TrendingUp, CalendarDays } from 'lucide-react';
+import { fallbackIpos, gradeIpos } from '../data/ipos';
 
 export default function IPOs() {
-  const [activeTab, setActiveTab] = useState('upcoming');
+  const [activeTab, setActiveTab] = useState('open');
   const [liveIpos, setLiveIpos] = useState([]);
-  const [scrapedIpos, setScrapedIpos] = useState([]);
+  const [scrapedIpos, setScrapedIpos] = useState(gradeIpos(fallbackIpos));
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all'); // 'all', 'active', 'alpha'
+  const [dataSource, setDataSource] = useState('Fallback market snapshot');
 
   useEffect(() => {
     async function fetchIpos() {
       try {
-        // Fetch Live Grey Market Data
         const gmpRes = await fetch('/api/ipos/gmp');
         if (gmpRes.ok) {
-           const gmpData = await gmpRes.json();
-           const processed = (gmpData.ipos || []).map(ipo => {
-              // Dynamic AI grading based mathematically on scraped GMP velocity
-              let aiScore = 40;
-              let rec = 'AVOID';
-              let reason = 'Negative or flat GMP detected. No short-term momentum.';
-              
-              if (ipo.gmpPercent > 40) { aiScore = 95; rec = 'STRONG BUY'; reason = 'Massive listing premium identified. Extremely high retail demand.'; }
-              else if (ipo.gmpPercent > 20) { aiScore = 80; rec = 'BUY'; reason = 'Solid oversubscription matrix visible in grey market pricing.'; }
-              else if (ipo.gmpPercent > 10) { aiScore = 65; rec = 'HOLD'; reason = 'Moderate grey market activity. Acceptable for long-term holds but short term pop is limited.'; }
-              else if (ipo.gmpPercent > 0) { aiScore = 50; rec = 'NEUTRAL'; reason = 'Very tight listing projected. Avoid applying for listing gains.'; }
-              
-              return { ...ipo, aiScore, aiRecommendation: rec, reasoning: reason };
-           });
-           setScrapedIpos(processed);
+          const gmpData = await gmpRes.json();
+          const live = gradeIpos(gmpData.ipos || []);
+          if (live.length) {
+            setScrapedIpos(live);
+            setDataSource(gmpData.source || 'Live IPO GMP feed');
+          }
         }
 
-        // Fetch Live News Articles
         const res = await fetch('/api/ipos');
         if (res.ok) {
           const data = await res.json();
@@ -41,6 +29,7 @@ export default function IPOs() {
         }
       } catch (err) {
         console.error('Failed to fetch IPO endpoints', err);
+        setScrapedIpos(gradeIpos(fallbackIpos));
       } finally {
         setLoading(false);
       }
@@ -48,132 +37,123 @@ export default function IPOs() {
     fetchIpos();
   }, []);
 
+  const openIpos = useMemo(() => scrapedIpos.filter(ipo => ipo.statusType === 'open'), [scrapedIpos]);
+  const upcomingIpos = useMemo(() => scrapedIpos.filter(ipo => ipo.statusType === 'upcoming'), [scrapedIpos]);
+  const alphaPick = useMemo(() => [...scrapedIpos].filter(ipo => ipo.statusType !== 'closed').sort((a, b) => b.aiScore - a.aiScore)[0], [scrapedIpos]);
+  const selectedIpos = activeTab === 'open' ? openIpos : upcomingIpos;
+
+  const renderIpoCard = (ipo) => (
+    <div key={ipo.id || ipo.name} className="glass-card ipo-card" style={{ borderTop: `3px solid ${ipo.recommendationTone === 'buy' ? 'var(--accent-green)' : ipo.recommendationTone === 'sell' ? 'var(--accent-red)' : 'var(--accent-cyan)'}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: '1.15rem', fontWeight: 800, fontFamily: 'var(--font-display)', marginBottom: 4 }}>{ipo.name}</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{ipo.sector || ipo.type}</div>
+        </div>
+        <div className={`badge ${ipo.recommendationTone === 'buy' ? 'badge-buy' : ipo.recommendationTone === 'sell' ? 'badge-sell' : 'badge-info'}`} style={{ padding: '6px 12px', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+          {ipo.aiRecommendation} ({ipo.aiScore}/100)
+        </div>
+      </div>
+
+      <div style={{ background: 'var(--bg-glass)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <Info size={18} color="var(--accent-cyan)" style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            <strong style={{ color: 'var(--text-primary)' }}>Recommendation:</strong> {ipo.reasoning}
+          </div>
+        </div>
+      </div>
+
+      <div className="ipo-metric-grid">
+        <div>
+          <span>GMP</span>
+          <strong>{ipo.gmp || 'TBA'} {ipo.gmpPercent ? `(${ipo.gmpPercent > 0 ? '+' : ''}${ipo.gmpPercent}%)` : ''}</strong>
+        </div>
+        <div>
+          <span>Subscription</span>
+          <strong>{ipo.subscriptionStatus || 'TBA'}</strong>
+        </div>
+        <div>
+          <span>Price Band</span>
+          <strong>{ipo.issuePrice || 'TBA'}</strong>
+        </div>
+        <div>
+          <span>Lot Size</span>
+          <strong>{ipo.lotSize || 'TBA'}</strong>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 16, fontSize: '0.78rem' }}>
+        <div>
+          <div style={{ color: 'var(--text-muted)' }}>Open</div>
+          <strong>{ipo.openDate || 'TBA'}</strong>
+        </div>
+        <div>
+          <div style={{ color: 'var(--text-muted)' }}>Close</div>
+          <strong>{ipo.closeDate || 'TBA'}</strong>
+        </div>
+        <div>
+          <div style={{ color: 'var(--text-muted)' }}>Listing</div>
+          <strong>{ipo.listingDate || 'TBA'}</strong>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 14, fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+        Source: {ipo.source || dataSource}
+      </div>
+    </div>
+  );
+
   return (
     <div>
       <div className="section-header animate-in">
         <div>
           <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Rocket color="var(--accent-cyan)" /> Upcoming IPOs & GMP Tracker
+            <Rocket color="var(--accent-cyan)" /> IPO Centre
           </div>
-          <div className="section-subtitle">Real-time Grey Market Premium (GMP) and AI subscription analysis</div>
+          <div className="section-subtitle">Open issues, upcoming IPOs, GMP, subscriptions, and AlphaBasket recommendations</div>
         </div>
+        <div className="badge badge-info">{dataSource}</div>
       </div>
 
       <div className="grid-3 animate-in" style={{ marginBottom: 24 }}>
-        <div 
-          className={`glass-card clickable ${filter === 'all' ? 'active-filter' : ''}`} 
-          onClick={() => { setFilter('all'); setActiveTab('upcoming'); }}
-          style={{ cursor: 'pointer', border: filter === 'all' ? '1px solid var(--accent-cyan)' : '1px solid transparent' }}
-        >
-          <div className="card-subtitle" style={{ marginBottom: 8 }}>Total Tracked</div>
-          <div className="stat-value" style={{ color: 'var(--accent-green)' }}>{scrapedIpos.length}</div>
-          <div className="stat-label">Live IPOs detected on IPOWatch</div>
-        </div>
-        <div 
-          className={`glass-card clickable ${filter === 'active' ? 'active-filter' : ''}`} 
-          onClick={() => { setFilter('active'); setActiveTab('upcoming'); }}
-          style={{ cursor: 'pointer', border: filter === 'active' ? '1px solid var(--accent-cyan)' : '1px solid transparent' }}
-        >
-          <div className="card-subtitle" style={{ marginBottom: 8 }}>High GMP Status</div>
-          <div className="stat-value" style={{ color: 'var(--accent-cyan)' }}>{scrapedIpos.filter(i => i.gmpPercent > 20).length}</div>
-          <div className="stat-label">IPOs showing 20%+ Listing Prem</div>
-        </div>
-        <div 
-          className={`glass-card clickable ${filter === 'alpha' ? 'active-filter' : ''}`} 
-          onClick={() => { setFilter('alpha'); setActiveTab('upcoming'); }}
-          style={{ cursor: 'pointer', border: filter === 'alpha' ? '1px solid var(--accent-gold)' : '1px solid transparent' }}
-        >
-          <div className="card-subtitle" style={{ marginBottom: 8 }}>AI Alpha Pick</div>
-          {scrapedIpos.filter(i => i.aiScore >= 80).length > 0 ? (
-             <>
-               <div className="stat-value" style={{ color: 'var(--accent-gold)', fontSize: '1.2rem', textOverflow:'ellipsis', overflow:'hidden', whiteSpace:'nowrap' }}>{scrapedIpos.find(i => i.aiScore >= 80)?.name}</div>
-               <div className="stat-label">Highest conviction IPO right now</div>
-             </>
-          ) : (
-             <>
-               <div className="stat-value" style={{ color: 'var(--accent-gold)', fontSize: '1.2rem' }}>None</div>
-               <div className="stat-label">No hyper-growth IPOs detected</div>
-             </>
-          )}
+        <button className={`glass-card metric-button ${activeTab === 'open' ? 'active-filter' : ''}`} onClick={() => setActiveTab('open')}>
+          <span className="card-subtitle">Open IPOs</span>
+          <strong className="stat-value" style={{ color: 'var(--accent-green)' }}>{openIpos.length}</strong>
+          <span className="stat-label">Available for subscription now</span>
+        </button>
+        <button className={`glass-card metric-button ${activeTab === 'upcoming' ? 'active-filter' : ''}`} onClick={() => setActiveTab('upcoming')}>
+          <span className="card-subtitle">Upcoming IPOs</span>
+          <strong className="stat-value" style={{ color: 'var(--accent-cyan)' }}>{upcomingIpos.length}</strong>
+          <span className="stat-label">Watch before applying</span>
+        </button>
+        <div className="glass-card">
+          <div className="card-subtitle" style={{ marginBottom: 8 }}>Best Current Setup</div>
+          <div style={{ color: 'var(--accent-gold)', fontWeight: 800, fontFamily: 'var(--font-display)', fontSize: '1rem', marginBottom: 6 }}>
+            {alphaPick?.name || 'No IPOs tracked'}
+          </div>
+          <div className="stat-label">{alphaPick ? `${alphaPick.aiRecommendation} - ${alphaPick.aiScore}/100` : 'Waiting for data'}</div>
         </div>
       </div>
 
       <div className="tabs animate-in">
+        <button className={`tab-btn ${activeTab === 'open' ? 'active' : ''}`} onClick={() => setActiveTab('open')}>
+          <TrendingUp size={15} /> Present Open IPOs
+        </button>
         <button className={`tab-btn ${activeTab === 'upcoming' ? 'active' : ''}`} onClick={() => setActiveTab('upcoming')}>
-          AI IPO Analysis
+          <CalendarDays size={15} /> Upcoming IPOs
         </button>
         <button className={`tab-btn ${activeTab === 'live' ? 'active' : ''}`} onClick={() => setActiveTab('live')}>
-          Live from IPO Watch
+          <ExternalLink size={15} /> IPO News Links
         </button>
       </div>
 
-      {activeTab === 'upcoming' && (
+      {(activeTab === 'open' || activeTab === 'upcoming') && (
         <div className="grid-2 animate-in">
-          {scrapedIpos.length === 0 ? (
-            <div style={{color:'var(--text-muted)'}}>Scraping active market details...</div>
-          ) : scrapedIpos
-            .filter(ipo => {
-              if (filter === 'active') return ipo.gmpPercent > 20;
-              if (filter === 'alpha') return ipo.aiScore >= 80;
-              return true;
-            })
-            .map((ipo) => (
-            <div key={ipo.id} className="glass-card" style={{ borderTop: `3px solid ${ipo.aiScore >= 70 ? 'var(--accent-green)' : ipo.aiScore >= 50 ? 'var(--accent-gold)' : 'var(--accent-red)'}` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 700, fontFamily: 'var(--font-display)', marginBottom: 4 }}>{ipo.name}</div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{ipo.sector}</div>
-                </div>
-                <div className={`badge ${ipo.aiScore >= 70 ? 'badge-buy' : ipo.aiScore >= 50 ? 'badge-info' : 'badge-sell'}`} style={{ padding: '6px 14px', fontSize: '0.8rem' }}>
-                  {ipo.aiRecommendation} ({ipo.aiScore}/100)
-                </div>
-              </div>
-
-              <div style={{ background: 'var(--bg-glass)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                  <Info size={20} color="var(--accent-cyan)" style={{ flexShrink: 0, marginTop: 2 }} />
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    <strong style={{ color: 'var(--text-primary)' }}>AI Insight:</strong> {ipo.reasoning}
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid-2" style={{ gap: 16, marginBottom: 16 }}>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Live GMP</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: '1.2rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{ipo.gmp}</span>
-                    {ipo.gmpPercent !== null && (
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: ipo.gmpPercent > 20 ? 'var(--accent-green)' : ipo.gmpPercent > 5 ? 'var(--accent-gold)' : 'var(--accent-red)' }}>
-                        (+{ipo.gmpPercent}%)
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Status</div>
-                  <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{ipo.subscriptionStatus}</div>
-                </div>
-              </div>
-
-              <div style={{ height: 1, background: 'var(--border-glass)', margin: '16px 0' }} />
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, fontSize: '0.8rem' }}>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Price Band</div>
-                  <div style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{ipo.issuePrice}</div>
-                </div>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Min Order Qty</div>
-                  <div style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{ipo.lotSize} Shares</div>
-                </div>
-                <div>
-                  <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>Dates</div>
-                  <div style={{ fontWeight: 600 }}>{ipo.openDate}</div>
-                </div>
-              </div>
+          {selectedIpos.length === 0 ? (
+            <div className="glass-card" style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-muted)' }}>
+              No {activeTab} IPOs found. The fallback data will refresh when the live feed returns.
             </div>
-          ))}
+          ) : selectedIpos.map(renderIpoCard)}
         </div>
       )}
 
@@ -181,32 +161,31 @@ export default function IPOs() {
         <div className="grid-2 animate-in" style={{ gap: 20 }}>
           {loading ? (
             <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-              Loading latest data from IPO Watch...
+              Loading latest IPO links...
             </div>
           ) : liveIpos.length === 0 ? (
             <div style={{ gridColumn: 'span 2', textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
               <Clock size={48} style={{ margin: '0 auto', marginBottom: 16, opacity: 0.3 }} />
-              Unable to load live data.
+              Unable to load live IPO links.
             </div>
           ) : (
             liveIpos.map((article, i) => (
-              <a 
-                href={article.link} 
-                target="_blank" 
-                rel="noreferrer" 
-                key={i} 
-                className="glass-card" 
-                style={{ textDecoration: 'none', transition: 'transform 0.2s', display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '3px solid var(--accent-gold)' }}
+              <a
+                href={article.link}
+                target="_blank"
+                rel="noreferrer"
+                key={i}
+                className="glass-card news-link-card"
+                style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', gap: 12, borderLeft: '3px solid var(--accent-gold)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <img src="https://ipowatch.in/wp-content/uploads/2021/10/cropped-favicon-32x32.png" width="16" height="16" alt="IPO Watch" style={{ borderRadius: 4 }} />
-                  {article.source} • {new Date(article.pubDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  {article.source} - {new Date(article.pubDate).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
                 </div>
                 <div style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>
                   {article.title}
                 </div>
-                <div style={{ marginTop: 'auto', fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>
-                  Read Full Details →
+                <div style={{ marginTop: 'auto', fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 700 }}>
+                  Open article <ExternalLink size={13} />
                 </div>
               </a>
             ))

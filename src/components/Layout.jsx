@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Search, Briefcase, LineChart, BarChart3, Compass, Bell, Menu, X, TrendingUp, Settings, PieChart, ShieldCheck, Activity, Zap, User, Rocket } from 'lucide-react';
+import { LayoutDashboard, Search, Briefcase, LineChart, BarChart3, Compass, Bell, Menu, X, TrendingUp, Settings, ShieldCheck, Activity, Zap, Rocket } from 'lucide-react';
 import { getMarketStatus } from '../services/marketData';
 import GlobalSearch from './GlobalSearch';
 
@@ -58,6 +58,17 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+        <div className="sidebar-insight">
+          <div className="sidebar-insight-title">
+            <ShieldCheck size={16} />
+            Research Mode
+          </div>
+          <p>Signals combine fundamentals, momentum, portfolio drift, and live market context.</p>
+          <div className="sidebar-insight-tags">
+            <span>NSE/BSE</span>
+            <span>Risk first</span>
+          </div>
+        </div>
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-glass)' }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>MARKET STATUS</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -81,7 +92,13 @@ export default function Layout() {
               {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
             </button>
             <GlobalSearch />
-            <span className="topbar-title">{pageNames[location.pathname] || 'AlphaBasket'}</span>
+            <div className="topbar-heading">
+              <span className="topbar-title">{pageNames[location.pathname] || 'AlphaBasket'}</span>
+              <div className="topbar-meta">
+                <span><Activity size={13} /> Live market data</span>
+                <span><Zap size={13} /> Quant scores</span>
+              </div>
+            </div>
           </div>
           <div className="topbar-right">
             <div className="live-indicator">

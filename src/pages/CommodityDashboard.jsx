@@ -8,11 +8,11 @@ export default function CommodityDashboard() {
   const commodityList = commodities
     ? Object.values(commodities)
     : [
-      { name: 'Gold', symbol: 'GC=F', price: 72100, changePercent: 0.5, currency: 'INR' },
-      { name: 'Silver', symbol: 'SI=F', price: 83500, changePercent: 0.8, currency: 'INR' },
-      { name: 'Crude Oil', symbol: 'CL=F', price: 6580, changePercent: -1.2, currency: 'INR' },
-      { name: 'Natural Gas', symbol: 'NG=F', price: 215, changePercent: -0.5, currency: 'INR' },
-      { name: 'Copper', symbol: 'HG=F', price: 850, changePercent: 0.3, currency: 'INR' },
+      { name: 'Gold', symbol: 'GC=F', unit: '10g', price: 144500, changePercent: 0.5, currency: 'INR' },
+      { name: 'Silver', symbol: 'SI=F', unit: '1 kg', price: 175000, changePercent: 0.8, currency: 'INR' },
+      { name: 'Crude Oil', symbol: 'CL=F', unit: 'barrel', price: 9050, changePercent: -1.2, currency: 'INR' },
+      { name: 'Natural Gas', symbol: 'NG=F', unit: 'mmBtu', price: 380, changePercent: -0.5, currency: 'INR' },
+      { name: 'Copper', symbol: 'HG=F', unit: 'kg', price: 1050, changePercent: 0.3, currency: 'INR' },
     ];
 
   const getEmoji = (name) => {
@@ -25,12 +25,12 @@ export default function CommodityDashboard() {
       <div className="section-header animate-in">
         <div>
           <div className="section-title">Live Commodity Prices</div>
-          <div className="section-subtitle">Real-time global commodity prices via Yahoo Finance</div>
+          <div className="section-subtitle">Live Yahoo futures converted to INR with the latest USD/INR rate</div>
         </div>
         <div className="live-indicator"><div className="live-pulse" /><span>LIVE</span></div>
       </div>
 
-      {loading && (
+      {loading && !commodities && (
         <div className="glass-card animate-in" style={{ textAlign: 'center', padding: 40 }}>
           <div className="loading-shimmer" style={{ height: 24, width: 200, margin: '0 auto', borderRadius: 8 }} />
           <div style={{ marginTop: 12, color: 'var(--text-muted)' }}>Fetching live commodity prices...</div>
@@ -59,6 +59,9 @@ export default function CommodityDashboard() {
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: '2rem', fontWeight: 700, marginBottom: 8 }}>
                 ₹{(c.price || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 10 }}>
+                per {c.unit || 'contract unit'}{c.usdInrRate ? ` | USD/INR ${c.usdInrRate.toFixed(2)}` : ''}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   fontFamily: 'var(--font-mono)',
@@ -86,7 +89,7 @@ export default function CommodityDashboard() {
           <div style={{ padding: 16, background: 'var(--bg-glass)', borderRadius: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--accent-gold)' }}>Gold & Silver</div>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-              Gold serves as the primary inflation hedge and safe haven in the portfolio. Silver offers higher beta exposure with industrial demand catalysts (EV, solar). Track real-time MCX prices to optimize entry/exit.
+              Gold serves as the primary inflation hedge and safe haven in the portfolio. Silver offers higher beta exposure with industrial demand catalysts (EV, solar). Track INR-converted global futures for cleaner live reference levels.
             </div>
           </div>
           <div style={{ padding: 16, background: 'var(--bg-glass)', borderRadius: 12 }}>

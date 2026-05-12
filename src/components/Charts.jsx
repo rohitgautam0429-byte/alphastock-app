@@ -1,5 +1,4 @@
 // Reusable chart components: ScoreGauge, MiniChart, RadarScoreChart, AllocationDonut, LivePrice
-import { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, AreaChart, Area, ResponsiveContainer, Tooltip, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 
 export function ScoreGauge({ score, size = 64, strokeWidth = 5, grade }) {
@@ -67,11 +66,24 @@ export function RadarScoreChart({ scores, maxScores, size = 250 }) {
 export function AllocationDonut({ data, size = 200 }) {
   return (
     <PieChart width={size} height={size}>
-      <Pie data={data} cx={size / 2} cy={size / 2} innerRadius={size * 0.32} outerRadius={size * 0.44} paddingAngle={3} dataKey="value" stroke="none">
+      <Pie
+        data={[{ name: 'Total', value: 100 }]}
+        cx={size / 2}
+        cy={size / 2}
+        innerRadius={size * 0.32}
+        outerRadius={size * 0.44}
+        dataKey="value"
+        fill="#E2E8F0"
+        stroke="none"
+        isAnimationActive={false}
+      />
+      <Pie data={data} cx={size / 2} cy={size / 2} innerRadius={size * 0.32} outerRadius={size * 0.44} paddingAngle={3} dataKey="value" stroke="none" isAnimationActive={false}>
         {data.map((entry, i) => (
           <Cell key={i} fill={entry.color} />
         ))}
       </Pie>
+      <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fill="#0F172A" fontSize={size * 0.14} fontWeight="700">100%</text>
+      <text x={size / 2} y={size / 2 + 15} textAnchor="middle" fill="#64748B" fontSize={size * 0.07} fontWeight="600">allocated</text>
       <Tooltip
         contentStyle={{ background: '#0F1529', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: '0.8rem' }}
         formatter={(value) => [`${value}%`, 'Allocation']}
@@ -81,26 +93,11 @@ export function AllocationDonut({ data, size = 200 }) {
 }
 
 export function LivePrice({ price, change, changePercent, showChange = true }) {
-  const isUp = (change || 0) >= 0;
-  const prevPriceRef = useRef(price);
-  const [flashClass, setFlashClass] = useState('');
-
-  useEffect(() => {
-    if (prevPriceRef.current !== undefined && price !== undefined && prevPriceRef.current !== price) {
-      if (price > prevPriceRef.current) {
-        setFlashClass('flash-up');
-      } else if (price < prevPriceRef.current) {
-        setFlashClass('flash-down');
-      }
-      const timer = setTimeout(() => setFlashClass(''), 1000);
-      prevPriceRef.current = price;
-      return () => clearTimeout(timer);
-    }
-    prevPriceRef.current = price;
-  }, [price]);
+  const isUp = (changePercent ?? change ?? 0) >= 0;
+  const changeAmount = change ?? (price != null && changePercent != null ? (price * changePercent) / 100 : null);
 
   return (
-    <div className={flashClass} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, transition: 'background-color 0.2s', padding: '2px 6px', margin: '-2px -6px' }}>
+    <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, transition: 'background-color 0.2s', padding: '2px 6px', margin: '-2px -6px' }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1rem' }}>
         ₹{price?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '—'}
       </span>
@@ -111,7 +108,7 @@ export function LivePrice({ price, change, changePercent, showChange = true }) {
           fontWeight: 600,
           color: isUp ? 'var(--accent-green)' : 'var(--accent-red)',
         }}>
-          {isUp ? '+' : ''}{changePercent?.toFixed(2)}%
+          {isUp ? '+' : ''}{changeAmount?.toFixed(2)} ({isUp ? '+' : ''}{changePercent?.toFixed(2)}%)
         </span>
       )}
     </div>

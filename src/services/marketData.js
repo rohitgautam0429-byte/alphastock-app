@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 // ══════ CONSTANTS ══════
-const USD_INR_RATE_DEFAULT = 84.0;
+const USD_INR_RATE_DEFAULT = 95.0;
 let cachedUsdInrRate = USD_INR_RATE_DEFAULT;
 
 // ══════ CORE FETCH ══════
@@ -29,7 +29,7 @@ async function fetchUsdInrRate() {
     if (data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
       cachedUsdInrRate = data.chart.result[0].meta.regularMarketPrice;
     }
-  } catch (err) {
+  } catch {
     console.warn('USD/INR fetch failed, using default:', cachedUsdInrRate);
   }
   return cachedUsdInrRate;
@@ -181,12 +181,12 @@ export async function fetchMarketIndices() {
 
 // ══════ COMMODITY PRICES (Always in INR) ══════
 
-// Commodity map using reliable Comex Futures (GC=F, SI=F)
-// Indian MCX prices include ~15% import duty + 3% GST on top of global rate.
-// We apply a mapped premium over international troy ounce (31.1035g) to perfectly simulate MCX levels
+// Commodity map using liquid Yahoo futures symbols.
+// Values are converted from the quoted USD contract unit into INR display units.
+// No fixed duty/GST premium is added because it made gold/silver drift from live market levels.
 const COMMODITY_MAP = {
-  'GC=F': { name: 'Gold',        unit: '10g',    conversion: (usd) => (usd * 1.155) / 31.1035 * 10 },
-  'SI=F': { name: 'Silver',      unit: '1 kg',   conversion: (usd) => (usd * 1.12) / 31.1035 * 1000 },
+  'GC=F': { name: 'Gold',        unit: '10g',    conversion: (usd) => usd / 31.1035 * 10 },
+  'SI=F': { name: 'Silver',      unit: '1 kg',   conversion: (usd) => usd / 31.1035 * 1000 },
   'CL=F': { name: 'Crude Oil',   unit: 'barrel', conversion: (usd) => usd },
   'NG=F': { name: 'Natural Gas', unit: 'mmBtu',  conversion: (usd) => usd },
   'HG=F': { name: 'Copper',      unit: 'kg',     conversion: (usd) => usd / 0.453592 },
@@ -220,6 +220,8 @@ export async function fetchCommodityPrices() {
           changePercent: changePct,
           currency: 'INR',
           source: 'yahoo',
+          usdInrRate: cachedUsdInrRate,
+          marketState: meta.marketState,
         };
       }
     } catch (e) {

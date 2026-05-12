@@ -33,6 +33,7 @@ dist-ssr
 
 # ── Windows binaries (not needed on cloud) ──
 cloudflared.exe
+ngrok.exe
 
 # ── Junk / temporary files ──
 *.txt

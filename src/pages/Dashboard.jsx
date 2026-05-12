@@ -1,10 +1,10 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts';
-import { TrendingUp, TrendingDown, Shield, Activity, ArrowUpRight, Rocket } from 'lucide-react';
+import { TrendingUp, TrendingDown, Shield, Activity, ArrowUpRight, Rocket, Target, Briefcase, BellRing } from 'lucide-react';
 import { stocks, marketIndices } from '../data/stocks';
-import { scoreAllStocks } from '../data/scoring';
-import { detectRegime, masterAllocation } from '../data/portfolio';
+import { constructBasket, detectRegime, getRebalanceSignal, masterAllocation } from '../data/portfolio';
+import { fallbackIpos, gradeIpos } from '../data/ipos';
 import { ScoreGauge, MiniChart, AllocationDonut, LivePrice } from '../components/Charts';
 import { useMarketIndices, useStockPrices, useCommodityPrices, useCurrencyRates } from '../services/marketData';
 
@@ -23,6 +23,8 @@ const portfolioPerformance = [
   { month: 'Mar', portfolio: 135.2, nifty: 125.8 },
 ];
 
+const getArticleLink = (item) => (item?.link || '').replaceAll('&amp;', '&');
+
 export default function Dashboard() {
   const { indices: liveIndices, loading: indicesLoading, lastUpdated } = useMarketIndices(30000);
   const stockIds = useMemo(() => stocks.map(s => s.id), []);
@@ -31,7 +33,8 @@ export default function Dashboard() {
   const { rates: liveForex } = useCurrencyRates(60000);
   const navigate = useNavigate();
 
-  const scoredStocks = useMemo(() => scoreAllStocks(stocks), []);
+  const basket = useMemo(() => constructBasket(stocks, livePrices), [livePrices]);
+  const rebalanceSignal = useMemo(() => getRebalanceSignal(basket.equityBasket), [basket]);
 
   const [news, setNews] = useState([]);
   const [newsLoading, setNewsLoading] = useState(true);
@@ -44,9 +47,12 @@ export default function Dashboard() {
         const res = await fetch('/api/ipos/gmp');
         if (res.ok) {
            const data = await res.json();
-           setScrapedIpos(data.ipos || []);
+           const ipos = gradeIpos(data.ipos || []);
+           setScrapedIpos(ipos.length ? ipos : gradeIpos(fallbackIpos));
         }
-      } catch (err) { }
+      } catch {
+        setScrapedIpos(gradeIpos(fallbackIpos));
+      }
     }
     fetchIpos();
   }, []);
@@ -77,8 +83,8 @@ export default function Dashboard() {
     { name: 'Small Cap', value: masterAllocation.smallCap, color: '#ec4899' },
   ];
 
-  // Merge live prices with scored stocks
-  const topMovers = scoredStocks.slice(0, 5).map(s => ({
+  // Dynamic leaderboard from the same weekly-rotated basket engine.
+  const topMovers = (basket.leaderboard || basket.equityBasket).slice(0, 5).map(s => ({
     ...s,
     livePrice: livePrices[s.id]?.price || s.price,
     liveChange: livePrices[s.id]?.changePercent ?? s.change,
@@ -107,6 +113,19 @@ export default function Dashboard() {
     2500
   );
 
+  const positiveIndices = indicesDisplay.filter(idx => (idx.changePercent || idx.change || 0) >= 0).length;
+  const topSignal = topMovers[0];
+  const briefStats = [
+    { label: 'Portfolio XIRR', value: '+35.2%', tone: 'positive', detail: 'vs Nifty +25.8%' },
+    { label: 'Health Score', value: '92/100', tone: 'positive', detail: 'Drift inside band' },
+    { label: 'Market Breadth', value: `${positiveIndices}/${indicesDisplay.length}`, tone: positiveIndices >= 3 ? 'positive' : 'negative', detail: 'Major indices green' },
+  ];
+  const commandQueue = [
+    { icon: Target, label: 'Highest score', value: topSignal ? `${topSignal.id} ${topSignal.score.total}/100` : 'Loading', to: topSignal ? `/stock/${encodeURIComponent(topSignal.nseSymbol || topSignal.id)}` : '/screener' },
+    { icon: Briefcase, label: 'Basket refresh', value: basket.metadata?.rotationKey || 'Weekly cycle', to: '/basket' },
+    { icon: BellRing, label: 'Alerts', value: news.length ? `${news.length} live headlines` : 'News feed ready', to: '/notifications' },
+  ];
+
   return (
     <div>
       {/* Live Data Banner */}
@@ -118,6 +137,54 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <section className="dashboard-command animate-in">
+        <div className="command-main">
+          <div className="command-kicker">
+            <Activity size={16} />
+            Live research desk
+          </div>
+          <h2>AlphaBasket market cockpit</h2>
+          <p>
+            {regime.name} regime, {positiveIndices} of {indicesDisplay.length} major indices positive, and {topSignal ? topSignal.name : 'the basket'} leading the current score table.
+          </p>
+          <div className="command-actions">
+            <button className="btn btn-primary" onClick={() => navigate('/basket')}>
+              <Briefcase size={16} /> Open Basket
+            </button>
+            <button className="btn btn-outline" onClick={() => navigate('/screener')}>
+              <Target size={16} /> Run Screener
+            </button>
+          </div>
+        </div>
+
+        <div className="command-panel">
+          <div className="command-panel-header">
+            <span>Command Queue</span>
+            <span className="badge badge-info">Today</span>
+          </div>
+          {commandQueue.map((item) => (
+            <button key={item.label} className="command-queue-item" onClick={() => navigate(item.to)}>
+              <span className="command-icon"><item.icon size={16} /></span>
+              <span>
+                <span className="command-label">{item.label}</span>
+                <strong>{item.value}</strong>
+              </span>
+              <ArrowUpRight size={15} />
+            </button>
+          ))}
+        </div>
+
+        <div className="command-stats">
+          {briefStats.map((stat) => (
+            <div key={stat.label} className="command-stat">
+              <span>{stat.label}</span>
+              <strong className={stat.tone}>{stat.value}</strong>
+              <small>{stat.detail}</small>
+            </div>
+          ))}
+        </div>
+      </section>
 
       {/* Market Indices */}
       <div className="grid-5 animate-in" style={{ marginBottom: 24 }}>
@@ -202,32 +269,31 @@ export default function Dashboard() {
         <div className="glass-card animate-in">
           <div className="card-header">
             <span className="card-title">Rebalancing Health</span>
-            <Shield size={18} color="var(--accent-green)" />
+            <Shield size={18} color={rebalanceSignal.needsRebalance ? 'var(--accent-gold)' : 'var(--accent-green)'} />
           </div>
           <div style={{ marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 6 }}>
               <span style={{ color: 'var(--text-muted)' }}>Portfolio Health Score</span>
-              <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>92/100</span>
+              <span style={{ color: rebalanceSignal.needsRebalance ? 'var(--accent-gold)' : 'var(--accent-green)', fontWeight: 600 }}>{rebalanceSignal.healthScore}/100</span>
             </div>
             <div className="rebalance-bar">
-              <div className="rebalance-fill" style={{ width: '92%', background: 'var(--gradient-green)' }} />
+              <div className="rebalance-fill" style={{ width: `${rebalanceSignal.healthScore}%`, background: rebalanceSignal.needsRebalance ? 'var(--gradient-gold)' : 'var(--gradient-green)' }} />
             </div>
           </div>
-          {[
-            { label: 'Large Cap', current: 51.2, target: 50, ok: true },
-            { label: 'Mid Cap', current: 29.5, target: 30, ok: true },
-            { label: 'Small Cap', current: 19.3, target: 20, ok: true },
-          ].map((item, i) => (
+          {rebalanceSignal.allocationRows.map((item, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-glass)', fontSize: '0.85rem' }}>
               <span style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
               <div style={{ display: 'flex', gap: 16 }}>
                 <span style={{ color: 'var(--text-muted)' }}>Target: {item.target}%</span>
-                <span style={{ color: item.ok ? 'var(--accent-green)' : 'var(--accent-red)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{item.current}%</span>
+                <span style={{ color: item.ok ? 'var(--accent-green)' : 'var(--accent-gold)', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{item.current}%</span>
               </div>
             </div>
           ))}
-          <div style={{ marginTop: 16, padding: 12, background: 'rgba(16,185,129,0.08)', borderRadius: 8, fontSize: '0.8rem', color: 'var(--accent-green)' }}>
-            ✓ All allocations within ±5% drift threshold. No rebalancing needed.
+          <div style={{ marginTop: 16, padding: 12, background: rebalanceSignal.needsRebalance ? 'rgba(217,119,6,0.1)' : 'rgba(16,185,129,0.08)', borderRadius: 8, fontSize: '0.8rem', color: rebalanceSignal.needsRebalance ? 'var(--accent-gold)' : 'var(--accent-green)' }}>
+            {rebalanceSignal.message}
+          </div>
+          <div style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Weekly review: {rebalanceSignal.nextReviewLabel}. Early rebalance triggers: score below 60, price shock over 4%, RSI extremes, or fundamental deterioration.
           </div>
         </div>
       </div>
@@ -272,11 +338,11 @@ export default function Dashboard() {
           ) : (
             news.slice(0, 4).map((item, idx) => (
               <a 
-                href={item.link} 
+                href={getArticleLink(item)}
                 target="_blank" 
                 rel="noreferrer"
                 key={idx} 
-                className="notif-item unread" 
+                className="notif-item unread news-link-card"
                 style={{ padding: 12, marginBottom: 8, display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.2s, background 0.2s', borderLeft: '3px solid var(--accent-cyan)' }}
               >
                 <div className="notif-content">
@@ -402,9 +468,9 @@ export default function Dashboard() {
           <div style={{ overflow: 'hidden', marginBottom: 20, padding: '10px 0', borderTop: '1px solid var(--border-glass)', borderBottom: '1px solid var(--border-glass)' }}>
             <div style={{ display: 'flex', gap: 40, animation: 'ticker 30s linear infinite', whiteSpace: 'nowrap' }}>
               {news.map((item, idx) => (
-                <span key={idx} style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 500 }}>
+                <a key={idx} href={getArticleLink(item)} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 500, textDecoration: 'none' }}>
                   📌 {item.title} <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>— {item.source}</span>
-                </span>
+                </a>
               ))}
             </div>
           </div>
@@ -433,9 +499,10 @@ export default function Dashboard() {
               return (
                 <a 
                   key={idx} 
-                  href={item.link} 
+                  href={getArticleLink(item)}
                   target="_blank" 
                   rel="noreferrer" 
+                  className="news-link-card"
                   style={{ textDecoration: 'none', color: 'inherit' }}
                 >
                   <div style={{ 

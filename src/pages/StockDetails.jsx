@@ -5,6 +5,8 @@ import { useStockHistory, NSE_SYMBOL_MAP } from '../services/marketData';
 import { Activity, BookOpen, AlertCircle, ArrowUpRight, ArrowDownRight, Globe, ShoppingBag, CheckCircle } from 'lucide-react';
 import { getVirtualPortfolio, saveVirtualPortfolio } from '../data/portfolio';
 
+const getArticleLink = (item) => (item?.link || '').replaceAll('&amp;', '&');
+
 export default function StockDetails() {
   const { symbol } = useParams();
   const decodedSymbol = decodeURIComponent(symbol);
@@ -179,10 +181,10 @@ export default function StockDetails() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
             <span style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', fontWeight: 600, color, display: 'flex', alignItems: 'center' }}>
               {isUp ? <ArrowUpRight size={24} /> : <ArrowDownRight size={24} />}
-              {isUp ? '+' : ''}{quote.changePercent?.toFixed(2)}%
+              {isUp ? '+' : ''}{quote.change?.toFixed(2)}
             </span>
             <span style={{ fontSize: '1rem', color: 'var(--text-muted)' }}>
-              ({isUp ? '+' : ''}{quote.change?.toFixed(2)})
+              ({isUp ? '+' : ''}{quote.changePercent?.toFixed(2)}%)
             </span>
           </div>
 
@@ -350,7 +352,7 @@ export default function StockDetails() {
               const bgColors = ['var(--accent-blue)', 'var(--accent-gold)', 'var(--accent-green)'];
               const color = bgColors[i % bgColors.length];
               return (
-                <a key={i} href={item.link} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', color: 'inherit' }}>
+                <a key={i} href={getArticleLink(item)} target="_blank" rel="noreferrer" className="news-link-card" style={{ textDecoration: 'none', color: 'inherit' }}>
                   <div style={{ 
                     padding: 16, background: 'var(--bg-glass)', borderRadius: 12, 
                     borderLeft: `3px solid ${color}`, height: '100%',
@@ -364,6 +366,9 @@ export default function StockDetails() {
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                       {item.source} • {new Date(item.pubDate).toLocaleDateString()}
+                    </div>
+                    <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--accent-cyan)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      Open story <ArrowUpRight size={13} />
                     </div>
                   </div>
                 </a>

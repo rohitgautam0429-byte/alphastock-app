@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { stocks } from '../data/stocks';
@@ -24,17 +24,17 @@ export default function GlobalSearch() {
   }, []);
 
   // Local NSE/BSE stock search (instant, always works - our 50+ curated stocks)
-  const localStockResults = query.trim()
+  const localStockResults = useMemo(() => query.trim()
     ? stocks.filter(s => {
         const q = query.toLowerCase();
         return s.id.toLowerCase().includes(q) ||
                s.name.toLowerCase().includes(q) ||
                s.sector.toLowerCase().includes(q);
       }).slice(0, 10)
-    : [];
+    : [], [query]);
 
   // Local commodity search (instant)
-  const localCommodityResults = query.trim()
+  const localCommodityResults = useMemo(() => query.trim()
     ? commodities.filter(c => {
         const q = query.toLowerCase();
         return c.name.toLowerCase().includes(q) ||
@@ -42,7 +42,7 @@ export default function GlobalSearch() {
                c.category.toLowerCase().includes(q) ||
                c.exchange.toLowerCase().includes(q);
       })
-    : [];
+    : [], [query]);
 
   // Robust search for ALL NSE/BSE listed stocks (5000+)
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function GlobalSearch() {
               const data = await res.json();
               return data.quotes || [];
             }
-          } catch (e) { return []; }
+          } catch { return []; }
         });
 
         const allQuotes = (await Promise.all(searchPromises)).flat();

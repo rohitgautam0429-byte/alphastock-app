@@ -1,3 +1,4 @@
+/* global process */
 import nodemailer from 'nodemailer';
 import cron from 'node-cron';
 import dotenv from 'dotenv';
@@ -8,6 +9,13 @@ import { calculateEquityScore } from '../data/scoring.js';
 import { evaluateAdvancedSwingScore } from './quantEngine.js';
 
 dotenv.config();
+
+const DEFAULT_EMAIL_TO = 'rameshchand1858@gmail.com';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SHORT_TERM_COOLDOWN_MS = 7 * DAY_MS;
+const LONG_TERM_COOLDOWN_MS = 14 * DAY_MS;
+const HIGH_CONVICTION_SHORT_SCORE = 88;
+const HIGH_CONVICTION_LONG_SCORE = 82;
 
 // Create transporter
 const transporter = nodemailer.createTransport({
@@ -39,10 +47,75 @@ function saveHistory(history) {
   }
 }
 
+function getHistoryEntry(history, stockId, bucket) {
+  const entry = history[stockId];
+  if (!entry || typeof entry !== 'object') return null;
+  return entry[bucket] || entry;
+}
+
+function getRotationStatus(history, stockId, bucket, now, cooldownMs, score, highConvictionScore) {
+  const entry = getHistoryEntry(history, stockId, bucket);
+  const timestamp = entry?.timestamp || 0;
+  const age = timestamp ? now - timestamp : Infinity;
+  const isRecent = age < cooldownMs;
+  const daysLeft = isRecent ? Math.ceil((cooldownMs - age) / DAY_MS) : 0;
+  const highConviction = score >= highConvictionScore;
+
+  return {
+    isRecent,
+    daysLeft,
+    highConviction,
+    penalty: isRecent && !highConviction ? 55 + daysLeft * 2 : isRecent ? 8 : 0,
+    label: isRecent
+      ? highConviction
+        ? `Repeated only because conviction stayed above ${highConvictionScore}/100. Cooldown left: ${daysLeft}d.`
+        : `Recently mailed. Cooling down for ${daysLeft}d.`
+      : 'Fresh idea: not mailed inside the cooldown window.',
+  };
+}
+
+function pickRotatedStocks(candidates, count, bucket, cooldownMs, highConvictionScore, now, scoreGetter, history) {
+  const ranked = candidates
+    .map(stock => {
+      const rawScore = scoreGetter(stock);
+      const rotation = getRotationStatus(history, stock.id, bucket, now, cooldownMs, rawScore, highConvictionScore);
+      return {
+        ...stock,
+        rotationStatus: rotation,
+        finalRankScore: rawScore - rotation.penalty,
+      };
+    })
+    .sort((a, b) => b.finalRankScore - a.finalRankScore);
+
+  const preferred = ranked.filter(stock => !stock.rotationStatus.isRecent || stock.rotationStatus.highConviction);
+  const picked = preferred.slice(0, count);
+
+  if (picked.length < count) {
+    const pickedIds = new Set(picked.map(stock => stock.id));
+    picked.push(...ranked.filter(stock => !pickedIds.has(stock.id)).slice(0, count - picked.length));
+  }
+
+  return picked;
+}
+
+function markSent(history, stock, bucket, now, score) {
+  const previous = history[stock.id] && typeof history[stock.id] === 'object' ? history[stock.id] : {};
+  const previousBucket = previous[bucket] || {};
+  history[stock.id] = {
+    ...previous,
+    [bucket]: {
+      timestamp: now,
+      score,
+      sentCount: (previousBucket.sentCount || 0) + 1,
+    },
+    timestamp: now,
+    score,
+  };
+}
+
 export const generateEmailContent = async () => {
   const history = loadHistory();
   const now = Date.now();
-  const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
 
   console.log('🛡️ Guillotine Filter Initiated: Assessing fundamentals...');
   
@@ -87,24 +160,42 @@ export const generateEmailContent = async () => {
     scoredStocks.push(...results);
   }
 
-  // Apply exclusionary rotative penalties
-  scoredStocks = scoredStocks.map(stock => {
-    let penalty = 0;
-    const sentData = history[stock.id];
-    
-    if (sentData && (now - sentData.timestamp) < THREE_DAYS) {
-      if (stock.score.total < 90) {
-        penalty = 25; // Block recent stocks unless highly favourable
-      }
-    }
-    
-    stock.finalRankScore = stock.score.total - penalty;
-    return stock;
-  });
+  const topStocks = pickRotatedStocks(
+    scoredStocks,
+    5,
+    'shortTerm',
+    SHORT_TERM_COOLDOWN_MS,
+    HIGH_CONVICTION_SHORT_SCORE,
+    now,
+    stock => stock.score.total,
+    history
+  );
 
-  // Sort again by final penalized score
-  scoredStocks.sort((a, b) => b.finalRankScore - a.finalRankScore);
-  const topStocks = scoredStocks.slice(0, 5);
+  const longTermCandidates = highQualityStocks
+    .map(stock => {
+      const longTermScore = calculateEquityScore(stock);
+      return {
+        ...stock,
+        longTermScore,
+        longTermRank:
+          longTermScore.total +
+          Math.max(0, stock.revenueCagr3y || 0) * 0.25 +
+          Math.max(0, stock.roe || 0) * 0.2 +
+          Math.max(0, stock.historicalReturns?.['1y'] || 0) * 0.12,
+      };
+    })
+    .sort((a, b) => b.longTermRank - a.longTermRank);
+
+  const longTermStocks = pickRotatedStocks(
+    longTermCandidates,
+    5,
+    'longTerm',
+    LONG_TERM_COOLDOWN_MS,
+    HIGH_CONVICTION_LONG_SCORE,
+    now,
+    stock => stock.longTermScore.total,
+    history
+  );
 
   // Failsafe: if less than 1 survives, drop out
   if (topStocks.length === 0) {
@@ -118,19 +209,23 @@ export const generateEmailContent = async () => {
 
   // Update history database
   topStocks.forEach(stock => {
-    history[stock.id] = { timestamp: now, score: stock.score.total };
+    markSent(history, stock, 'shortTerm', now, stock.score.total);
+  });
+  longTermStocks.forEach(stock => {
+    markSent(history, stock, 'longTerm', now, stock.longTermScore.total);
   });
   saveHistory(history);
 
   let htmlContent = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
       <div style="background-color: #0f172a; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
-        <h1 style="color: #38bdf8; margin: 0;">AlphaBasket Swing Radar</h1>
-        <p style="color: #94a3b8; font-size: 14px; margin-top: 5px;">High-Probability Short Term Setups</p>
+        <h1 style="color: #38bdf8; margin: 0;">AlphaBasket Daily Radar</h1>
+        <p style="color: #94a3b8; font-size: 14px; margin-top: 5px;">Short-term and long-term stock recommendations</p>
       </div>
       
       <div style="padding: 24px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
-        <p style="font-size: 16px; margin-bottom: 24px;">The AI has rotated out previously sent tickers and identified the top Swing Trade setups primed for breakout based on Moving Average crossovers, optimal RSI entry zones, and high micro-momentum:</p>
+        <p style="font-size: 16px; margin-bottom: 24px;">The AI has identified near-term momentum setups and durable long-term compounders based on fundamentals, trend strength, valuation quality, risk filters, and cooldown-aware rotation. Recently mailed stocks are skipped unless conviction is unusually high.</p>
+        <h2 style="color:#0f172a; font-size:20px; margin:0 0 16px 0;">Short Term Ideas (1-12 weeks)</h2>
   `;
 
   topStocks.forEach((stock, idx) => {
@@ -139,7 +234,7 @@ export const generateEmailContent = async () => {
     const keyDrivers = Object.entries(breakdown)
       .sort((a, b) => b[1] - a[1]) // Sort factors by highest score
       .slice(0, 3) // Take top 3 factors driving the score
-      .map(([key, _]) => key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1').trim())
+      .map(([key]) => key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1').trim())
       .join(', ');
 
     htmlContent += `
@@ -159,6 +254,35 @@ export const generateEmailContent = async () => {
           <p style="margin: 0; font-size: 14px; color: #64748b;">
             <strong>Key Growth Drivers:</strong> ${keyDrivers}
           </p>
+          <p style="margin: 10px 0 0 0; font-size: 12px; color: #64748b;">
+            <strong>Rotation:</strong> ${stock.rotationStatus?.label || 'Fresh idea.'}
+          </p>
+        </div>
+    `;
+  });
+
+  htmlContent += `
+        <h2 style="color:#0f172a; font-size:20px; margin:28px 0 16px 0;">Long Term Ideas (1 year+)</h2>
+  `;
+
+  longTermStocks.forEach((stock, idx) => {
+    const score = stock.longTermScore;
+    htmlContent += `
+        <div style="margin-bottom: 18px; padding: 16px; background-color: #f0fdf4; border-left: 4px solid #10b981; border-radius: 4px;">
+          <h2 style="margin: 0 0 8px 0; color: #14532d; font-size: 18px;">
+            ${idx + 1}. ${stock.name} (${stock.id})
+          </h2>
+          <div style="display: flex; gap: 10px; margin-bottom: 12px; font-size: 14px; flex-wrap: wrap;">
+            <span style="background-color: #dcfce7; color: #166534; padding: 4px 8px; border-radius: 4px; font-weight: bold;">Quality Score: ${score.total.toFixed(1)}/100</span>
+            <span style="background-color: #e2e8f0; color: #475569; padding: 4px 8px; border-radius: 4px;">ROE: ${stock.roe}%</span>
+            <span style="background-color: #e2e8f0; color: #475569; padding: 4px 8px; border-radius: 4px;">3Y Revenue CAGR: ${stock.revenueCagr3y}%</span>
+          </div>
+          <p style="margin: 0; font-size: 14px; color: #475569;">
+            Long-term thesis: strong financial quality, trend resilience, and sector positioning. Prefer staggered buying and review after quarterly results.
+          </p>
+          <p style="margin: 10px 0 0 0; font-size: 12px; color: #64748b;">
+            <strong>Rotation:</strong> ${stock.rotationStatus?.label || 'Fresh idea.'}
+          </p>
         </div>
     `;
   });
@@ -175,7 +299,7 @@ export const generateEmailContent = async () => {
 };
 
 export const runDailyJob = async (isTest = false) => {
-  const emailTo = process.env.EMAIL_TO || process.env.EMAIL_USER;
+  const emailTo = process.env.EMAIL_TO || DEFAULT_EMAIL_TO || process.env.EMAIL_USER;
   
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
     if (isTest) {
@@ -192,7 +316,7 @@ export const runDailyJob = async (isTest = false) => {
   const mailOptions = {
     from: `"AlphaBasket AI" <${process.env.EMAIL_USER}>`,
     to: emailTo,
-    subject: `Top 5 Stock Recommendations — ${dateStr}`,
+    subject: `AlphaBasket Daily Stock Recommendations - ${dateStr}`,
     html: htmlContent,
   };
 
@@ -204,16 +328,17 @@ export const runDailyJob = async (isTest = false) => {
   }
 };
 
-// Schedule it to run every day at 07:00 AM IST (UTC+5:30 = 01:30 UTC)
+// Schedule it to run every day at 07:00 AM IST.
 export const startEmailBotScheduler = () => {
   // Set flag so quantEngine routes API calls through localhost:4000 internally
   process.env.SERVER_INTERNAL = 'true';
   
-  console.log("🕒 Email Bot Scheduler Started: Reports will send daily at 7:00 AM IST (pre-market)");
+  console.log(`Email Bot Scheduler Started: Reports will send daily at 7:00 AM IST to ${process.env.EMAIL_TO || DEFAULT_EMAIL_TO}`);
   
-  // '30 1 * * *' = 01:30 UTC = 07:00 AM IST (UTC+5:30)
-  cron.schedule('30 1 * * 1-5', () => {
-    console.log("⏱️ Cron Triggered [7:00 AM IST]: Starting pre-market stock analysis...");
+  cron.schedule('0 7 * * *', () => {
+    console.log("Cron Triggered [7:00 AM IST]: Starting daily stock analysis...");
     runDailyJob();
+  }, {
+    timezone: 'Asia/Kolkata',
   });
 };

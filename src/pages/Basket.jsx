@@ -84,7 +84,9 @@ export default function Basket() {
       <div className="section-header animate-in">
         <div>
           <div className="section-title">AI-Constructed Portfolio Basket</div>
-          <div className="section-subtitle">{basket.equityBasket.length} stocks • 50/30/20 Large/Mid/Small allocation • AI-optimized weights</div>
+          <div className="section-subtitle">
+            {basket.equityBasket.length} stocks • 50/30/20 allocation • {basket.metadata?.policy || 'AI-optimized weights'} • refreshed {basket.metadata?.refreshedAtLabel || 'live'}
+          </div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '1.5rem', fontFamily: 'var(--font-mono)', fontWeight: 800, color: basketTodayGain >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
@@ -145,13 +147,16 @@ export default function Basket() {
               { label: 'Large Cap', count: largeCap.length, color: '#3b82f6' },
               { label: 'Mid Cap', count: midCap.length, color: '#8b5cf6' },
               { label: 'Small Cap', count: smallCap.length, color: '#ec4899' },
-              { label: 'Total', count: basket.equityBasket.length, color: 'var(--accent-cyan)' },
+              { label: 'Cycle', count: basket.metadata?.rotationKey || basket.equityBasket.length, color: 'var(--accent-cyan)' },
             ].map(item => (
               <div key={item.label} style={{ textAlign: 'center', padding: 12, background: 'var(--bg-glass)', borderRadius: 10 }}>
                 <div className="stat-value" style={{ fontSize: '1.5rem', color: item.color }}>{item.count}</div>
                 <div className="stat-label">{item.label}</div>
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: 12, fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            Next review: {basket.metadata?.nextReviewLabel || 'weekly'}. Replacements are pulled from the reserve list when score, momentum, or risk changes.
           </div>
         </div>
       </div>

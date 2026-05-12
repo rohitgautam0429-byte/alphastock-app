@@ -1,12 +1,14 @@
-/* eslint-env node */
+/* global process */
 // AlphaBasket Production Server
 // Serves static React app + proxies Yahoo Finance & Groww APIs
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import { startEmailBotScheduler } from './src/services/emailBot.js';
+import { fallbackIpos } from './src/data/ipos.js';
 
 dotenv.config();
 
@@ -19,17 +21,125 @@ function checkEnvHealth() {
   const issues = [];
   if (!process.env.EMAIL_USER) issues.push('EMAIL_USER not set');
   if (!process.env.EMAIL_PASS) issues.push('EMAIL_PASS not set');
-  if (!process.env.EMAIL_TO)   issues.push('EMAIL_TO not set (will default to EMAIL_USER)');
   if (issues.length > 0) {
     console.warn('\n  ⚠️  .env issues detected:');
     issues.forEach(i => console.warn(`     ✗ ${i}`));
     console.warn('  Email bot will be disabled until these are fixed.\n');
   } else {
-    console.log(`  ✅ .env OK — Emails → ${process.env.EMAIL_TO}`);
+    console.log(`  .env OK - Emails -> ${process.env.EMAIL_TO || 'rameshchand1858@gmail.com'}`);
   }
 }
 
 const YAHOO_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function decodeXmlText(value = '') {
+  return value
+    .replace(/<!\[CDATA\[|\]\]>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .trim();
+}
+
+async function resolvePublisherLink(link) {
+  const cleanLink = decodeXmlText(link);
+  if (!cleanLink.includes('news.google.com')) return cleanLink;
+
+  try {
+    const decodedLink = await decodeGoogleNewsArticle(cleanLink);
+    if (decodedLink) return decodedLink;
+
+    const response = await fetch(cleanLink, {
+      redirect: 'follow',
+      headers: { 'User-Agent': YAHOO_UA, 'Accept': 'text/html,application/xhtml+xml,*/*' },
+    });
+    if (response.url && !response.url.includes('news.google.com')) return response.url;
+
+    const html = await response.text();
+    const directMatch =
+      html.match(/data-n-au="([^"]+)"/) ||
+      html.match(/<a[^>]+href="(https?:\/\/(?!news\.google)[^"]+)"/);
+    return directMatch ? decodeXmlText(directMatch[1]) : cleanLink;
+  } catch {
+    return cleanLink;
+  }
+}
+
+function getGoogleNewsArticleId(link) {
+  try {
+    const url = new URL(link);
+    if (!url.hostname.includes('news.google.com') || !url.pathname.includes('/articles/')) return null;
+    return url.pathname.split('/').filter(Boolean).pop();
+  } catch {
+    return null;
+  }
+}
+
+async function getGoogleNewsDecodeParams(articleId) {
+  const candidateUrls = [
+    `https://news.google.com/articles/${articleId}`,
+    `https://news.google.com/rss/articles/${articleId}`,
+  ];
+
+  for (const url of candidateUrls) {
+    try {
+      const response = await fetch(url, {
+        headers: { 'User-Agent': YAHOO_UA },
+      });
+      const html = await response.text();
+      const signature = html.match(/data-n-a-sg="([^"]+)"/)?.[1];
+      const timestamp = html.match(/data-n-a-ts="([^"]+)"/)?.[1];
+      if (signature && timestamp) return { signature, timestamp };
+    } catch {
+      // Try the next URL shape.
+    }
+  }
+
+  return null;
+}
+
+async function decodeGoogleNewsArticle(link) {
+  const articleId = getGoogleNewsArticleId(link);
+  if (!articleId) return null;
+
+  const params = await getGoogleNewsDecodeParams(articleId);
+  if (!params) return null;
+
+  const requestBody = [[[
+    'Fbv4je',
+    JSON.stringify([
+      'garturlreq',
+      [['X', 'X', ['X', 'X'], null, null, 1, 1, 'US:en', null, 1, null, null, null, null, null, 0, 1], 'X', 'X', 1, [1, 1, 1], 1, 1, null, 0, 0, null, 0],
+      articleId,
+      Number(params.timestamp),
+      params.signature,
+    ]),
+    null,
+    'generic',
+  ]]];
+
+  try {
+    const response = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'User-Agent': YAHOO_UA,
+        'Referer': 'https://news.google.com/',
+      },
+      body: `f.req=${encodeURIComponent(JSON.stringify(requestBody))}`,
+    });
+    const text = await response.text();
+    const jsonLine = text.split('\n').find(line => line.startsWith('[['));
+    if (!jsonLine) return null;
+
+    const outer = JSON.parse(jsonLine);
+    const inner = JSON.parse(outer?.[0]?.[2] || '[]');
+    return inner?.[1] ? decodeXmlText(inner[1]) : null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Simple in-memory TTL cache to survive transient upstream failures ──
 const _cache = {};
@@ -142,20 +252,20 @@ app.get('/api/news', async (req, res) => {
       const pubDate = (itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
       const source = (itemXml.match(/<source[^>]*>([\s\S]*?)<\/source>/) || [])[1] || 'News';
       
-      const cleanTitle = title.replace(/<\!\[CDATA\[|\]\]>/g, '').trim();
-      const cleanLink = link.replace(/<\!\[CDATA\[|\]\]>/g, '').trim();
+      const cleanTitle = decodeXmlText(title);
+      const cleanLink = decodeXmlText(link);
       
       if (cleanTitle) {
         items.push({
           title: cleanTitle,
           link: cleanLink,
           pubDate: pubDate.trim(),
-          source: source.replace(/<\!\[CDATA\[|\]\]>/g, '').trim(),
+          source: decodeXmlText(source),
         });
       }
     }
     
-    const result = { articles: items };
+    const result = { articles: await Promise.all(items.map(async item => ({ ...item, link: await resolvePublisherLink(item.link) }))) };
     if (items.length > 0) cacheSet(cacheKey, result, 10 * 60 * 1000); // cache 10 min
     res.json(result);
   } catch (err) {
@@ -188,8 +298,8 @@ app.get('/api/ipos', async (req, res) => {
       const link = (itemXml.match(/<link>([\s\S]*?)<\/link>/) || [])[1] || '';
       const pubDate = (itemXml.match(/<pubDate>([\s\S]*?)<\/pubDate>/) || [])[1] || '';
       
-      const cleanTitle = title.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-      const cleanLink = link.replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+      const cleanTitle = decodeXmlText(title);
+      const cleanLink = decodeXmlText(link);
       
       if (cleanTitle) {
         items.push({
@@ -249,6 +359,10 @@ app.get('/api/ipos/gmp', async (req, res) => {
              gmp: gmp,
              gmpPercent: parseFloat((estListing.match(/\(([^)]+)%\)/) || [])[1]) || 0,
              subscriptionStatus: status,
+             statusType: status.toLowerCase().includes('closed') || status.toLowerCase().includes('listed')
+               ? 'closed'
+               : status.toLowerCase().includes('upcoming') ? 'upcoming' : 'open',
+             source: 'IPO Watch live GMP',
              aiScore: 50 // We will grade this in the frontend
            });
         }
@@ -257,10 +371,13 @@ app.get('/api/ipos/gmp', async (req, res) => {
     
     // Sort by highest GMP% to bubble active grey markets to top of UI widget
     parsedIPOs.sort((a,b) => b.gmpPercent - a.gmpPercent);
-    res.json({ ipos: parsedIPOs.slice(0, 15) });
+    res.json({
+      ipos: parsedIPOs.length ? parsedIPOs.slice(0, 15) : fallbackIpos,
+      source: parsedIPOs.length ? 'IPO Watch live GMP' : 'Fallback market snapshot'
+    });
   } catch (err) {
     console.error('IPO Scraper error:', err.message);
-    res.status(502).json({ ipos: [], error: err.message });
+    res.json({ ipos: fallbackIpos, source: 'Fallback market snapshot', error: err.message });
   }
 });
 
@@ -269,7 +386,15 @@ app.use(express.static(path.join(__dirname, 'dist')));
 
 // ── SPA fallback (for React Router) ──
 app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+
+  try {
+    res.status(200).type('html').send(fs.readFileSync(path.join(__dirname, 'dist', 'index.html')));
+  } catch (err) {
+    res.status(500).send(`AlphaBasket build is missing: ${err.message}`);
+  }
 });
 
 app.listen(PORT, () => {
@@ -277,7 +402,7 @@ app.listen(PORT, () => {
   console.log(`     http://localhost:${PORT}`);
   console.log(`  📊 Proxying: Yahoo Finance + Groww APIs`);
   console.log(`  📁 Static: ./dist`);
-  console.log(`  📧 Email Bot: Daily at 7:00 AM IST (weekdays only)`);
+  console.log(`  📧 Email Bot: Daily at 7:00 AM IST`);
   checkEnvHealth();
   
   startEmailBotScheduler();

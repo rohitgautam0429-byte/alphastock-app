@@ -20,8 +20,8 @@
     "score": 100
   },
   "KNRCON": {
-    "timestamp": 1776326808495,
-    "score": 67.5
+    "timestamp": 1778563853384,
+    "score": 68.52
   },
   "INFY": {
     "timestamp": 1776326808495,
@@ -32,16 +32,16 @@
     "score": 63.77
   },
   "PARAS": {
-    "timestamp": 1776326808495,
-    "score": 62.96
+    "timestamp": 1778563853384,
+    "score": 75.41
   },
   "DELHIVERY": {
     "timestamp": 1776326808495,
     "score": 62.49
   },
   "SONACOMS": {
-    "timestamp": 1776326935949,
-    "score": 61.98
+    "timestamp": 1778564315881,
+    "score": 65.96
   },
   "SYRMA": {
     "timestamp": 1776326935949,
@@ -52,12 +52,12 @@
     "score": 60.85
   },
   "HAL": {
-    "timestamp": 1776326935949,
-    "score": 60.67
+    "timestamp": 1778564315881,
+    "score": 65.2
   },
   "ADANIENT": {
-    "timestamp": 1776326935949,
-    "score": 60.57
+    "timestamp": 1778564315881,
+    "score": 64.46
   },
   "TRENT": {
     "timestamp": 1776328096396,
@@ -76,8 +76,8 @@
     "score": 68.28
   },
   "OLECTRA": {
-    "timestamp": 1776328096396,
-    "score": 67.66
+    "timestamp": 1778563853384,
+    "score": 68.39
   },
   "TITAN": {
     "timestamp": 1776328321906,
@@ -88,8 +88,8 @@
     "score": 66.67
   },
   "POLYCAB": {
-    "timestamp": 1776328321906,
-    "score": 64.05
+    "timestamp": 1778564315881,
+    "score": 61.88
   },
   "ITC": {
     "timestamp": 1776328321906,
@@ -98,5 +98,17 @@
   "PERSISTENT": {
     "timestamp": 1776328321906,
     "score": 61.42
+  },
+  "CGPOWER": {
+    "timestamp": 1778563853384,
+    "score": 74.78
+  },
+  "HINDUNILVR": {
+    "timestamp": 1778563853384,
+    "score": 69.17
+  },
+  "HINDALCO": {
+    "timestamp": 1778564315881,
+    "score": 64.73
   }
 }
