@@ -45,6 +45,7 @@ export default function GlobalSearch() {
     : [], [query]);
 
   // Robust search for ALL NSE/BSE listed stocks (5000+)
+  // Uses both Groww and Yahoo Search APIs in parallel for maximum coverage
   useEffect(() => {
     const performSearch = async () => {
       const q = query.trim();
@@ -54,47 +55,71 @@ export default function GlobalSearch() {
       }
       setLoading(true);
       try {
-        // We now primarily use Yahoo Search but with "Indian Stock Hints"
-        // This is much more reliable for 5000+ stocks than Groww's web API
-        const cleanQ = q.replace(/\s+/g, '');
-        const searchQueries = [
-          q, // As is (D MART)
-          cleanQ, // Stripped spaces (DMART)
-          `${cleanQ}.NS`, // Force NSE (DMART.NS)
-          `${cleanQ}.BO`, // Force BSE (DMART.BO)
-        ].filter(Boolean);
-
         const results = [];
         const seenSymbols = new Set(localStockResults.map(s => s.id + '.NS'));
 
-        // Try Yahoo Search for each hint (in parallel)
-        const searchPromises = searchQueries.map(async (sq) => {
+        // ── Strategy: Fire both Groww + Yahoo in parallel ──
+        const cleanQ = q.replace(/\s+/g, '');
+
+        // 1. Groww Search API (best for Indian stocks)
+        const growwPromise = (async () => {
           try {
-            const res = await fetch(`/api/yahoo-search?q=${encodeURIComponent(sq)}&quotesCount=6&newsCount=0`);
+            const res = await fetch(`/api/groww-search/st_query?page=0&query=${encodeURIComponent(q)}&size=15&web=true`);
             if (res.ok) {
               const data = await res.json();
-              return data.quotes || [];
+              const stocks = data?.data?.content || [];
+              return stocks
+                .filter(item => item.entity_type === 'STOCK' || item.entity_type === 'stock')
+                .map(item => ({
+                  nse_scrip_code: item.nse_scrip_code || item.bse_scrip_code || item.search_id,
+                  company_name: item.title || item.long_name || item.search_id,
+                  logo_url: item.logo_url || null,
+                  exchange: item.nse_scrip_code ? 'NSE' : 'BSE',
+                  _isGroww: true,
+                  _symbol: (item.nse_scrip_code || item.bse_scrip_code || item.search_id) + (item.nse_scrip_code ? '.NS' : '.BO'),
+                }));
             }
-          } catch { return []; }
-        });
+          } catch { /* silent */ }
+          return [];
+        })();
 
-        const allQuotes = (await Promise.all(searchPromises)).flat();
+        // 2. Yahoo Search API (broader coverage, international stocks too)
+        const yahooPromise = (async () => {
+          const searchQueries = [q, `${cleanQ}.NS`, `${cleanQ}.BO`];
+          const allQuotes = [];
+          const promises = searchQueries.map(async (sq) => {
+            try {
+              const res = await fetch(`/api/yahoo-search?q=${encodeURIComponent(sq)}&quotesCount=8&newsCount=0`);
+              if (res.ok) {
+                const data = await res.json();
+                return data.quotes || [];
+              }
+            } catch { /* silent */ }
+            return [];
+          });
+          (await Promise.all(promises)).forEach(quotes => allQuotes.push(...quotes));
+          return allQuotes
+            .filter(item =>
+              (item.quoteType === 'EQUITY' || item.quoteType === 'ETF') &&
+              (item.symbol.endsWith('.NS') || item.symbol.endsWith('.BO'))
+            )
+            .map(item => ({
+              nse_scrip_code: item.symbol.replace('.NS', '').replace('.BO', ''),
+              company_name: item.shortname || item.longname || item.symbol,
+              logo_url: null,
+              exchange: item.symbol.endsWith('.NS') ? 'NSE' : 'BSE',
+              _isYahoo: true,
+              _symbol: item.symbol,
+            }));
+        })();
 
-        // Filter for Indian Equities and remove duplicates
-        allQuotes.forEach(item => {
-          if ((item.quoteType === 'EQUITY' || item.quoteType === 'ETF') && 
-              (item.symbol.endsWith('.NS') || item.symbol.endsWith('.BO'))) {
-            if (!seenSymbols.has(item.symbol)) {
-              seenSymbols.add(item.symbol);
-              results.push({
-                nse_scrip_code: item.symbol.replace('.NS', '').replace('.BO', ''),
-                company_name: item.shortname || item.longname || item.symbol,
-                logo_url: null,
-                exchange: item.symbol.endsWith('.NS') ? 'NSE' : 'BSE',
-                _isYahoo: true,
-                _symbol: item.symbol,
-              });
-            }
+        const [growwStocks, yahooStocks] = await Promise.all([growwPromise, yahooPromise]);
+
+        // Merge results: Groww first (better Indian stock data), then Yahoo
+        [...growwStocks, ...yahooStocks].forEach(item => {
+          if (!seenSymbols.has(item._symbol)) {
+            seenSymbols.add(item._symbol);
+            results.push(item);
           }
         });
 
@@ -106,7 +131,7 @@ export default function GlobalSearch() {
       }
     };
 
-    const debounceTimer = setTimeout(performSearch, 500);
+    const debounceTimer = setTimeout(performSearch, 300);
     return () => clearTimeout(debounceTimer);
   }, [query, localStockResults]);
 
