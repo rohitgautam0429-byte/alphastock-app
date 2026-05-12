@@ -160,8 +160,38 @@ export async function fetchMarketIndices() {
   for (const sym of symbols) {
     // Use 5d range so after-market-close we still get today's closing price
     const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
-    const quote = extractPriceFromChart(data, false); // Indices are already in INR
-    if (quote) results[sym] = quote;
+    if (!data?.chart?.result?.[0]) continue;
+    
+    const result = data.chart.result[0];
+    const meta = result.meta;
+    const closePrices = result.indicators?.quote?.[0]?.close || [];
+    
+    // Filter out null values to get valid closes
+    const validCloses = closePrices.filter(p => p !== null && p !== undefined);
+    
+    // Current price = latest market price from meta (most accurate)
+    const currentPrice = meta.regularMarketPrice ?? validCloses[validCloses.length - 1] ?? 0;
+    
+    // Previous close = second-to-last valid close from actual time series data
+    // This is yesterday's close, NOT 5 days ago like meta.previousClose would be
+    let previousClose;
+    if (validCloses.length >= 2) {
+      previousClose = validCloses[validCloses.length - 2];
+    } else {
+      previousClose = meta.previousClose ?? meta.chartPreviousClose ?? currentPrice;
+    }
+    
+    const change = currentPrice - previousClose;
+    const changePercent = previousClose ? ((change / previousClose) * 100) : 0;
+    
+    results[sym] = {
+      price: currentPrice,
+      previousClose,
+      change,
+      changePercent,
+      marketState: meta.marketState,
+      name: meta.shortName || meta.longName || meta.symbol,
+    };
   }
   
   if (Object.keys(results).length === 0) return null;
@@ -201,13 +231,25 @@ export async function fetchCommodityPrices() {
       // Use 5d range so after-market-close we still get today's closing price
       const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
       if (data?.chart?.result?.[0]) {
-        const meta = data.chart.result[0].meta;
-        const usdPrice   = meta.regularMarketPrice ?? 0;
-        const prevClose  = meta.previousClose ?? meta.chartPreviousClose ?? 0;
+        const result = data.chart.result[0];
+        const meta = result.meta;
+        const closePrices = result.indicators?.quote?.[0]?.close || [];
         const info = COMMODITY_MAP[sym];
 
-        const inrPrice    = info.conversion(usdPrice)  * cachedUsdInrRate;
-        const inrPrevClose = info.conversion(prevClose) * cachedUsdInrRate;
+        // Filter out null values
+        const validCloses = closePrices.filter(p => p !== null && p !== undefined);
+
+        // Get raw USD prices from actual time series
+        const rawUsdPrice = meta.regularMarketPrice ?? validCloses[validCloses.length - 1] ?? 0;
+        let rawPrevClose;
+        if (validCloses.length >= 2) {
+          rawPrevClose = validCloses[validCloses.length - 2];
+        } else {
+          rawPrevClose = meta.previousClose ?? meta.chartPreviousClose ?? rawUsdPrice;
+        }
+
+        const inrPrice     = info.conversion(rawUsdPrice)  * cachedUsdInrRate;
+        const inrPrevClose = info.conversion(rawPrevClose) * cachedUsdInrRate;
         const change    = inrPrice - inrPrevClose;
         const changePct = inrPrevClose ? ((change / inrPrevClose) * 100) : 0;
 
