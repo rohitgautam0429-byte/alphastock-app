@@ -381,6 +381,162 @@ app.get('/api/ipos/gmp', async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════════
+// ── UPSTOX API INTEGRATION (OAuth2 + Market Data)
+// ══════════════════════════════════════════════════
+
+const UPSTOX_API_KEY = process.env.UPSTOX_API_KEY;
+const UPSTOX_API_SECRET = process.env.UPSTOX_API_SECRET;
+const UPSTOX_REDIRECT_URI = (process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`) + '/api/upstox/callback';
+let upstoxAccessToken = null;
+
+// Step 1: Redirect user to Upstox login
+app.get('/api/upstox/login', (req, res) => {
+  if (!UPSTOX_API_KEY) return res.status(500).json({ error: 'UPSTOX_API_KEY not configured' });
+  const authUrl = `https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=${UPSTOX_API_KEY}&redirect_uri=${encodeURIComponent(UPSTOX_REDIRECT_URI)}`;
+  console.log('[UPSTOX] Redirecting to login:', authUrl);
+  res.redirect(authUrl);
+});
+
+// Step 2: Handle OAuth callback from Upstox
+app.get('/api/upstox/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send('Authorization code missing');
+  
+  try {
+    console.log('[UPSTOX] Exchanging auth code for token...');
+    const tokenRes = await fetch('https://api.upstox.com/v2/login/authorization/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body: new URLSearchParams({
+        code,
+        client_id: UPSTOX_API_KEY,
+        client_secret: UPSTOX_API_SECRET,
+        redirect_uri: UPSTOX_REDIRECT_URI,
+        grant_type: 'authorization_code',
+      }),
+    });
+    
+    const data = await tokenRes.json();
+    if (data.access_token) {
+      upstoxAccessToken = data.access_token;
+      console.log('[UPSTOX] ✅ Access token obtained successfully');
+      // Redirect to the app's settings page with success
+      res.redirect('/settings?upstox=connected');
+    } else {
+      console.error('[UPSTOX] ❌ Token exchange failed:', data);
+      res.redirect('/settings?upstox=error&msg=' + encodeURIComponent(data.message || 'Token exchange failed'));
+    }
+  } catch (err) {
+    console.error('[UPSTOX] ❌ Callback error:', err.message);
+    res.redirect('/settings?upstox=error&msg=' + encodeURIComponent(err.message));
+  }
+});
+
+// Helper: Make authenticated Upstox API request
+async function upstoxFetch(endpoint) {
+  if (!upstoxAccessToken) throw new Error('Not authenticated with Upstox');
+  const res = await fetch(`https://api.upstox.com/v2${endpoint}`, {
+    headers: { 'Authorization': `Bearer ${upstoxAccessToken}`, 'Accept': 'application/json' },
+  });
+  return res.json();
+}
+
+// Check connection status
+app.get('/api/upstox/status', (req, res) => {
+  res.json({ 
+    connected: !!upstoxAccessToken, 
+    apiKeyConfigured: !!UPSTOX_API_KEY,
+    redirectUri: UPSTOX_REDIRECT_URI,
+  });
+});
+
+// Get user profile
+app.get('/api/upstox/profile', async (req, res) => {
+  try {
+    const data = await upstoxFetch('/user/profile');
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Get holdings (portfolio)
+app.get('/api/upstox/holdings', async (req, res) => {
+  try {
+    const data = await upstoxFetch('/portfolio/long-term-holdings');
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Get positions (intraday)
+app.get('/api/upstox/positions', async (req, res) => {
+  try {
+    const data = await upstoxFetch('/portfolio/short-term-positions');
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Get funds & margin
+app.get('/api/upstox/funds', async (req, res) => {
+  try {
+    const data = await upstoxFetch('/user/get-funds-and-margin');
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Get order book
+app.get('/api/upstox/orders', async (req, res) => {
+  try {
+    const data = await upstoxFetch('/order/retrieve-all');
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// Place order
+app.use(express.json());
+app.post('/api/upstox/order', async (req, res) => {
+  if (!upstoxAccessToken) return res.status(401).json({ error: 'Not authenticated with Upstox' });
+  
+  try {
+    const orderRes = await fetch('https://api.upstox.com/v2/order/place', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${upstoxAccessToken}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+    const data = await orderRes.json();
+    console.log('[UPSTOX] Order placed:', data);
+    res.json(data);
+  } catch (err) {
+    console.error('[UPSTOX] Order error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get live market quote for instruments
+app.get('/api/upstox/quote', async (req, res) => {
+  const { symbol } = req.query;
+  if (!symbol) return res.status(400).json({ error: 'symbol query param required' });
+  try {
+    const data = await upstoxFetch(`/market-quote/quotes?instrument_key=${encodeURIComponent(symbol)}`);
+    res.json(data);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
 // ── Serve static React build ──
 app.use(express.static(path.join(__dirname, 'dist')));
 
