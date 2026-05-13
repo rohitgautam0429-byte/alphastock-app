@@ -406,4 +406,14 @@ app.listen(PORT, () => {
   checkEnvHealth();
   
   startEmailBotScheduler();
+  
+  // ── Keep-alive self-ping (Render free tier sleeps after 15 min) ──
+  // Ping ourselves every 14 minutes to prevent the server from sleeping
+  // This ensures the email cron at 7:00 AM IST actually fires
+  const RENDER_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  setInterval(() => {
+    fetch(`${RENDER_URL}/api/yahoo-chart/%5ENSEI?interval=1d&range=1d`)
+      .then(() => console.log(`[KEEP-ALIVE] Self-ping OK at ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}`))
+      .catch(() => {});
+  }, 14 * 60 * 1000); // Every 14 minutes
 });

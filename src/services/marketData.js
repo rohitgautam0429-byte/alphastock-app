@@ -158,27 +158,35 @@ export async function fetchMarketIndices() {
   const results = {};
   
   for (const sym of symbols) {
-    // Use 5d range so after-market-close we still get today's closing price
-    const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
+    // Strategy: Use 1d range first — meta.previousClose is accurate (yesterday's close)
+    // If 1d gives no data (e.g., weekend), use 5d range and compute from time series
+    let data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=1d&includePrePost=true`);
+    let usedRange = '1d';
+    
+    if (!data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
+      data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
+      usedRange = '5d';
+    }
+    
     if (!data?.chart?.result?.[0]) continue;
     
     const result = data.chart.result[0];
     const meta = result.meta;
-    const closePrices = result.indicators?.quote?.[0]?.close || [];
+    const currentPrice = meta.regularMarketPrice ?? 0;
     
-    // Filter out null values to get valid closes
-    const validCloses = closePrices.filter(p => p !== null && p !== undefined);
-    
-    // Current price = latest market price from meta (most accurate)
-    const currentPrice = meta.regularMarketPrice ?? validCloses[validCloses.length - 1] ?? 0;
-    
-    // Previous close = second-to-last valid close from actual time series data
-    // This is yesterday's close, NOT 5 days ago like meta.previousClose would be
     let previousClose;
-    if (validCloses.length >= 2) {
-      previousClose = validCloses[validCloses.length - 2];
-    } else {
+    if (usedRange === '1d') {
+      // For 1d range, meta.previousClose IS yesterday's actual close
       previousClose = meta.previousClose ?? meta.chartPreviousClose ?? currentPrice;
+    } else {
+      // For 5d range, compute from time series
+      const closePrices = result.indicators?.quote?.[0]?.close || [];
+      const validCloses = closePrices.filter(p => p !== null && p !== undefined);
+      if (validCloses.length >= 2) {
+        previousClose = validCloses[validCloses.length - 2];
+      } else {
+        previousClose = meta.previousClose ?? meta.chartPreviousClose ?? currentPrice;
+      }
     }
     
     const change = currentPrice - previousClose;
@@ -228,25 +236,19 @@ export async function fetchCommodityPrices() {
 
   for (const sym of yahooSymbols) {
     try {
-      // Use 5d range so after-market-close we still get today's closing price
-      const data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
+      // Use 1d range first (meta.previousClose = yesterday's close)
+      let data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=1d&includePrePost=true`);
+      
+      if (!data?.chart?.result?.[0]?.meta?.regularMarketPrice) {
+        data = await fetchJSON(`/api/yahoo-chart/${sym}?interval=1d&range=5d&includePrePost=true`);
+      }
+      
       if (data?.chart?.result?.[0]) {
-        const result = data.chart.result[0];
-        const meta = result.meta;
-        const closePrices = result.indicators?.quote?.[0]?.close || [];
+        const meta = data.chart.result[0].meta;
         const info = COMMODITY_MAP[sym];
 
-        // Filter out null values
-        const validCloses = closePrices.filter(p => p !== null && p !== undefined);
-
-        // Get raw USD prices from actual time series
-        const rawUsdPrice = meta.regularMarketPrice ?? validCloses[validCloses.length - 1] ?? 0;
-        let rawPrevClose;
-        if (validCloses.length >= 2) {
-          rawPrevClose = validCloses[validCloses.length - 2];
-        } else {
-          rawPrevClose = meta.previousClose ?? meta.chartPreviousClose ?? rawUsdPrice;
-        }
+        const rawUsdPrice = meta.regularMarketPrice ?? 0;
+        const rawPrevClose = meta.previousClose ?? meta.chartPreviousClose ?? rawUsdPrice;
 
         const inrPrice     = info.conversion(rawUsdPrice)  * cachedUsdInrRate;
         const inrPrevClose = info.conversion(rawPrevClose) * cachedUsdInrRate;

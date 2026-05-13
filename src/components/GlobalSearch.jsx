@@ -3,11 +3,10 @@ import { Search, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { stocks } from '../data/stocks';
 import { commodities } from '../data/commodities';
+import { NSE_ALL_STOCKS } from '../data/nseStocks';
 
 export default function GlobalSearch() {
   const [query, setQuery] = useState('');
-  const [growwResults, setGrowwResults] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [activeTab, setActiveTab] = useState('all');
   const dropdownRef = useRef(null);
@@ -44,96 +43,30 @@ export default function GlobalSearch() {
       })
     : [], [query]);
 
-  // Robust search for ALL NSE/BSE listed stocks (5000+)
-  // Uses both Groww and Yahoo Search APIs in parallel for maximum coverage
-  useEffect(() => {
-    const performSearch = async () => {
-      const q = query.trim();
-      if (!q || q.length < 2) {
-        setGrowwResults([]);
-        return;
-      }
-      setLoading(true);
-      try {
-        const results = [];
-        const seenSymbols = new Set(localStockResults.map(s => s.id + '.NS'));
-
-        // ── Strategy: Fire both Groww + Yahoo in parallel ──
-        const cleanQ = q.replace(/\s+/g, '');
-
-        // 1. Groww Search API (best for Indian stocks)
-        const growwPromise = (async () => {
-          try {
-            const res = await fetch(`/api/groww-search/st_query?page=0&query=${encodeURIComponent(q)}&size=15&web=true`);
-            if (res.ok) {
-              const data = await res.json();
-              const stocks = data?.data?.content || [];
-              return stocks
-                .filter(item => item.entity_type === 'STOCK' || item.entity_type === 'stock')
-                .map(item => ({
-                  nse_scrip_code: item.nse_scrip_code || item.bse_scrip_code || item.search_id,
-                  company_name: item.title || item.long_name || item.search_id,
-                  logo_url: item.logo_url || null,
-                  exchange: item.nse_scrip_code ? 'NSE' : 'BSE',
-                  _isGroww: true,
-                  _symbol: (item.nse_scrip_code || item.bse_scrip_code || item.search_id) + (item.nse_scrip_code ? '.NS' : '.BO'),
-                }));
-            }
-          } catch { /* silent */ }
-          return [];
-        })();
-
-        // 2. Yahoo Search API (broader coverage, international stocks too)
-        const yahooPromise = (async () => {
-          const searchQueries = [q, `${cleanQ}.NS`, `${cleanQ}.BO`];
-          const allQuotes = [];
-          const promises = searchQueries.map(async (sq) => {
-            try {
-              const res = await fetch(`/api/yahoo-search?q=${encodeURIComponent(sq)}&quotesCount=8&newsCount=0`);
-              if (res.ok) {
-                const data = await res.json();
-                return data.quotes || [];
-              }
-            } catch { /* silent */ }
-            return [];
-          });
-          (await Promise.all(promises)).forEach(quotes => allQuotes.push(...quotes));
-          return allQuotes
-            .filter(item =>
-              (item.quoteType === 'EQUITY' || item.quoteType === 'ETF') &&
-              (item.symbol.endsWith('.NS') || item.symbol.endsWith('.BO'))
-            )
-            .map(item => ({
-              nse_scrip_code: item.symbol.replace('.NS', '').replace('.BO', ''),
-              company_name: item.shortname || item.longname || item.symbol,
-              logo_url: null,
-              exchange: item.symbol.endsWith('.NS') ? 'NSE' : 'BSE',
-              _isYahoo: true,
-              _symbol: item.symbol,
-            }));
-        })();
-
-        const [growwStocks, yahooStocks] = await Promise.all([growwPromise, yahooPromise]);
-
-        // Merge results: Groww first (better Indian stock data), then Yahoo
-        [...growwStocks, ...yahooStocks].forEach(item => {
-          if (!seenSymbols.has(item._symbol)) {
-            seenSymbols.add(item._symbol);
-            results.push(item);
-          }
-        });
-
-        setGrowwResults(results.slice(0, 20));
-      } catch (err) {
-        console.warn('Search service error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const debounceTimer = setTimeout(performSearch, 300);
-    return () => clearTimeout(debounceTimer);
-  }, [query, localStockResults]);
+  // ALL NSE stocks search — instant, offline, covers 2300+ stocks
+  const nseSearchResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || q.length < 1) return [];
+    
+    // Get IDs of curated stocks to avoid duplicates
+    const curatedIds = new Set(stocks.map(s => s.id.toUpperCase()));
+    
+    return NSE_ALL_STOCKS
+      .filter(stock => {
+        // Skip stocks already shown in curated results
+        if (curatedIds.has(stock.s.toUpperCase())) return false;
+        // Match symbol or company name
+        return stock.s.toLowerCase().includes(q) || 
+               stock.n.toLowerCase().includes(q);
+      })
+      .slice(0, 15)
+      .map(stock => ({
+        symbol: stock.s,
+        name: stock.n,
+        yahooSymbol: stock.s + '.NS',
+        exchange: 'NSE',
+      }));
+  }, [query]);
 
   const handleSelectLocalStock = (stockId) => {
     setShowDropdown(false);
@@ -141,11 +74,10 @@ export default function GlobalSearch() {
     navigate(`/stock/${encodeURIComponent(stockId + '.NS')}`);
   };
 
-  const handleSelectGrowwStock = (stock) => {
+  const handleSelectNseStock = (stock) => {
     setShowDropdown(false);
     setQuery('');
-    const symbol = stock._symbol || (stock.nse_scrip_code ? stock.nse_scrip_code + '.NS' : stock.bse_scrip_code + '.BO');
-    navigate(`/stock/${encodeURIComponent(symbol)}`);
+    navigate(`/stock/${encodeURIComponent(stock.yahooSymbol)}`);
   };
 
   const handleSelectCommodity = () => {
@@ -173,9 +105,10 @@ export default function GlobalSearch() {
   const showStocks = activeTab !== 'commodities';
   const showCommodities = activeTab !== 'stocks';
   const hasLocalStocks = showStocks && localStockResults.length > 0;
-  const hasGroww = showStocks && growwResults.length > 0;
+  const hasNseStocks = showStocks && nseSearchResults.length > 0;
   const hasCommodities = showCommodities && localCommodityResults.length > 0;
-  const hasResults = hasLocalStocks || hasGroww || hasCommodities;
+  const hasResults = hasLocalStocks || hasNseStocks || hasCommodities;
+  const totalStockCount = localStockResults.length + nseSearchResults.length;
 
   return (
     <div className="search-container" ref={dropdownRef} style={{ position: 'relative', width: '100%', maxWidth: '440px' }}>
@@ -183,7 +116,7 @@ export default function GlobalSearch() {
         <Search size={18} style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
         <input
           type="text"
-          placeholder="Search 5000+ NSE / BSE stocks (e.g. RELIANCE, ZOMATO)..."
+          placeholder="Search 2300+ NSE stocks (DMART, SYMPHONY, TCS)..."
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -204,7 +137,6 @@ export default function GlobalSearch() {
             fontWeight: 500,
           }}
         />
-        {loading && <div style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, border: '2px solid #3b82f6', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />}
       </div>
 
       {showDropdown && query.trim().length > 0 && (
@@ -218,7 +150,7 @@ export default function GlobalSearch() {
           <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb' }}>
             {[
               { key: 'all', label: 'All' },
-              { key: 'stocks', label: `Stocks (${localStockResults.length + growwResults.length})` },
+              { key: 'stocks', label: `Stocks (${totalStockCount})` },
               { key: 'commodities', label: `Commodities (${localCommodityResults.length})` },
             ].map(tab => (
               <button
@@ -297,16 +229,16 @@ export default function GlobalSearch() {
                 </>
               )}
 
-              {/* GROWW API results — all other NSE/BSE stocks */}
-              {hasGroww && (
+              {/* ALL NSE STOCKS — from official NSE equity list (2300+) */}
+              {hasNseStocks && (
                 <>
                   <div style={{ padding: '10px 16px 4px', fontSize: '0.7rem', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>
-                    📈 All NSE / BSE Stocks
+                    📈 All NSE Listed Stocks ({NSE_ALL_STOCKS.length}+)
                   </div>
-                  {growwResults.map((item, idx) => (
+                  {nseSearchResults.map((item, idx) => (
                     <div
-                      key={`groww-${idx}`}
-                      onClick={() => handleSelectGrowwStock(item)}
+                      key={`nse-${idx}`}
+                      onClick={() => handleSelectNseStock(item)}
                       style={{
                         padding: '10px 16px', display: 'flex', alignItems: 'center',
                         gap: 12, cursor: 'pointer', borderBottom: '1px solid #f3f4f6',
@@ -319,23 +251,19 @@ export default function GlobalSearch() {
                         width: 34, height: 34, borderRadius: 8, overflow: 'hidden',
                         background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        {item.logo_url ? (
-                          <img src={item.logo_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { e.target.style.display='none'; e.target.parentElement.innerHTML = '📊'; }} />
-                        ) : (
-                          <Activity size={16} color="#6b7280" />
-                        )}
+                        <Activity size={16} color="#6b7280" />
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#111827' }}>
-                            {item.nse_scrip_code || item.bse_scrip_code || item.company_name}
+                            {item.symbol}
                           </span>
                           <span style={{ fontSize: '0.68rem', background: '#f3f4f6', padding: '2px 8px', borderRadius: 6, color: '#6b7280', fontWeight: 600 }}>
-                            {item.nse_scrip_code ? 'NSE' : 'BSE'}
+                            {item.exchange}
                           </span>
                         </div>
                         <div style={{ fontSize: '0.78rem', color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {item.company_name || item.long_name || ''}
+                          {item.name}
                         </div>
                       </div>
                     </div>
@@ -388,13 +316,9 @@ export default function GlobalSearch() {
                 </>
               )}
             </div>
-          ) : !loading ? (
-            <div style={{ padding: 28, textAlign: 'center', color: '#9ca3af' }}>
-              No results found for "{query}"
-            </div>
           ) : (
             <div style={{ padding: 28, textAlign: 'center', color: '#9ca3af' }}>
-              Searching NSE / BSE...
+              No results found for &quot;{query}&quot;
             </div>
           )}
         </div>
